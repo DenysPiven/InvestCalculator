@@ -587,7 +587,7 @@ export default function App() {
 
     const a = document.createElement('a')
     a.href = canvas.toDataURL('image/png')
-    a.download = 'ibkr_earnings_with_buys.png'
+    a.download = 'investcalculator_chart.png'
     a.click()
   }
 
@@ -595,7 +595,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="toolbar">
-          <h1>IBKR Label Editor</h1>
+          <h1>InvestCalculator</h1>
           <p>Loading chart data…</p>
         </div>
       </div>
@@ -719,7 +719,7 @@ export default function App() {
 
       <div className="main">
         <div className="toolbar">
-          <h1>IBKR Label Editor</h1>
+          <h1>InvestCalculator</h1>
           <button type="button" onClick={reset}>
             Reset positions
           </button>
@@ -735,7 +735,7 @@ export default function App() {
             disabled={busy}
             onClick={() => fileRef.current?.click()}
           >
-            {busy ? 'Loading…' : 'Upload IBKR CSV'}
+            {busy ? 'Loading…' : 'Upload CSV'}
           </button>
           <button type="button" className="primary" onClick={exportPng}>
             Export PNG

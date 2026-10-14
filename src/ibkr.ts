@@ -124,7 +124,7 @@ export function parseIbkrTrades(csvText: string): Trade[] {
   }
   if (!trades.length) {
     throw new Error(
-      'No stock buys found. Upload an IBKR Activity Statement CSV (Trades section).',
+      'No stock buys found. Upload an Activity Statement CSV (Trades section).',
     )
   }
   return trades

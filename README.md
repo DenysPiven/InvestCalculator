@@ -1,11 +1,11 @@
 # InvestCalculator
 
-Interactive IBKR earnings chart in the browser:
+Portfolio earnings chart in the browser:
 
-- Upload an IBKR **Activity Statement** CSV
+- Upload a brokerage **Activity Statement** CSV (Interactive Brokers format)
 - Keep a synthetic **Classic (demo)** chart plus your private uploads in a left sidebar (uploads stay in browser `localStorage` only; trash to delete)
 - Drag buy-point labels (saved per portfolio)
-- Toggle VOO / QQQ / SMH / TOTAL / **if all → VOO**
+- Toggle series / **if all → baseline**
 - Export PNG
 
 Live (GitHub Pages): after enabling Pages,  
@@ -30,7 +30,7 @@ Open [http://127.0.0.1:43127](http://127.0.0.1:43127).
 ## Data
 
 - **Price cache:** `public/prices_cache.json` holds ~10y daily closes for VOO / QQQ / SMH / EURUSD. Refresh locally with `npm run update-prices` (incremental) or `npm run update-prices:full`. CI also refreshes the cache before each Pages deploy.
-- **Upload:** client reads whichever equity tickers / dates / amounts are in the IBKR Trades section, builds matching series, and sets the time axis from first buy → today. Prices come from the bundled cache (add more with `python3 scripts/update_prices_cache.py --symbols SPY,IWM`). Earnings = value − invested (€); open day starts at €0.
+- **Upload:** client reads equity tickers / dates / amounts from the Trades section, builds matching series, and sets the time axis from first buy → today. Prices come from the bundled cache (add more with `python3 scripts/update_prices_cache.py --symbols SPY,IWM`). Earnings = value − invested (€); open day starts at €0.
 - **Classic demo:** synthetic buys in `public/chart_data.json` (regenerate with `python3 scripts/generate_demo_chart.py`). Not a real brokerage statement.
 - **Your uploads** never leave the browser; they are not committed to the repo.
 
