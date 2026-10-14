@@ -168,6 +168,15 @@ function fmtEnd(v: number) {
   return `${sign}${Math.round(v)}€`
 }
 
+function fmtPct(earn: number, invested: number) {
+  if (!(invested > 0) || !Number.isFinite(earn)) return ''
+  const pct = (earn / invested) * 100
+  const sign = pct >= 0 ? '+' : ''
+  const abs = Math.abs(pct)
+  const body = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1)
+  return `${sign}${body}%`
+}
+
 function fmtEur(v: number) {
   return `€${Math.round(v)}`
 }
@@ -1004,7 +1013,10 @@ export default function App() {
               .map((sym) => {
                 const val = data.series[sym][data.series[sym].length - 1]
                 const color = data.colors[sym] ?? colorFor(sym)
-                const text = `${nameOf(sym)} ${fmtEnd(val)}`
+                const pct = fmtPct(val, invested[sym] ?? 0)
+                const text = pct
+                  ? `${nameOf(sym)} ${fmtEnd(val)} (${pct})`
+                  : `${nameOf(sym)} ${fmtEnd(val)}`
                 return (
                   <text
                     key={`end-${sym}`}
