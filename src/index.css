@@ -169,7 +169,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 12px;
 }
 
@@ -178,8 +178,21 @@ body {
   font-size: 1.35rem;
   font-weight: 650;
   margin: 0;
-  margin-right: auto;
   letter-spacing: -0.02em;
+  align-self: center;
+}
+
+.toolbar > button {
+  align-self: center;
+}
+
+.toolbar-export {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 132px;
 }
 
 .toolbar p {
@@ -216,24 +229,68 @@ button.primary:hover {
   background: #16382c;
 }
 
-button.toggle-labels {
-  margin-left: auto;
-  min-width: 5.5rem;
-  border-style: dashed;
-  opacity: 0.7;
-}
-
-button.toggle-labels.on {
-  border-style: solid;
-  opacity: 1;
-  background: #fff;
-  border-color: #1f4e3d;
-  color: #1f4e3d;
-}
-
 button:disabled {
   opacity: 0.55;
   cursor: wait;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+  color: #57534e;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: #c4bdb2;
+  border: 1px solid #a8a29e;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #faf7f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s ease;
+}
+
+.switch input:checked + .switch-track {
+  background: #1f4e3d;
+  border-color: #1f4e3d;
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(16px);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid #1f4e3d;
+  outline-offset: 2px;
+}
+
+.switch-text {
+  line-height: 1.1;
 }
 
 .toggles {

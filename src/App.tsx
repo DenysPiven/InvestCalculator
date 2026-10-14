@@ -697,18 +697,20 @@ export default function App() {
           >
             {busy ? 'Loading…' : 'Upload IBKR CSV'}
           </button>
-          <button type="button" className="primary" onClick={exportPng}>
-            Export PNG
-          </button>
-          <button
-            type="button"
-            className={`toggle-labels${showLabels ? ' on' : ''}`}
-            onClick={() => setShowLabels((v) => !v)}
-            aria-pressed={showLabels}
-            title={showLabels ? 'Hide buy labels' : 'Show buy labels'}
-          >
-            Labels
-          </button>
+          <div className="toolbar-export">
+            <button type="button" className="primary" onClick={exportPng}>
+              Export PNG
+            </button>
+            <label className="switch" title="Buy labels on the chart">
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden />
+              <span className="switch-text">Buy labels</span>
+            </label>
+          </div>
           <input
             ref={fileRef}
             type="file"
@@ -927,30 +929,28 @@ export default function App() {
               )
             })}
 
-            {showLabels &&
-              seriesOrder
-                .filter((sym) => visible[sym] !== false && data.series[sym])
-                .map((sym) => {
-                  const val = data.series[sym][data.series[sym].length - 1]
-                  const color = data.colors[sym] ?? colorFor(sym)
-                  const text = `${nameOf(sym)} ${fmtEnd(val)}`
-                  return (
-                    <text
-                      key={`end-${sym}`}
-                      x={endX}
-                      y={yScale(val) + 4}
-                      fontSize={12}
-                      fontWeight={700}
-                      fill={color}
-                      textAnchor="start"
-                    >
-                      {text}
-                    </text>
-                  )
-                })}
+            {seriesOrder
+              .filter((sym) => visible[sym] !== false && data.series[sym])
+              .map((sym) => {
+                const val = data.series[sym][data.series[sym].length - 1]
+                const color = data.colors[sym] ?? colorFor(sym)
+                const text = `${nameOf(sym)} ${fmtEnd(val)}`
+                return (
+                  <text
+                    key={`end-${sym}`}
+                    x={endX}
+                    y={yScale(val) + 4}
+                    fontSize={12}
+                    fontWeight={700}
+                    fill={color}
+                    textAnchor="start"
+                  >
+                    {text}
+                  </text>
+                )
+              })}
 
-            {showLabels &&
-              visible.TOTAL !== false &&
+            {visible.TOTAL !== false &&
               visible.ALL_VOO !== false &&
               data.series.ALL_VOO &&
               Math.abs(delta) >= 1 && (
