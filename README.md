@@ -6,6 +6,7 @@ Portfolio earnings chart in the browser:
 - Keep a synthetic **Classic (demo)** chart plus your private uploads in a left sidebar (uploads stay in browser `localStorage` only; trash to delete)
 - Drag buy-point labels (saved per portfolio)
 - Toggle series / **if all → baseline**
+- Toggle **Avg lines** (per-ticker break-even at 0€ with average fill)
 - Export PNG
 
 Live (GitHub Pages): after enabling Pages,  
