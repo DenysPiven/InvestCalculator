@@ -23,7 +23,7 @@ export type PortfolioStore = {
 }
 
 export const CLASSIC_ID = 'classic'
-export const PORTFOLIOS_KEY = 'ibkr-portfolios-v1'
+export const PORTFOLIOS_KEY = 'ibkr-portfolios-v2'
 
 export function fingerprintFromChart(chart: ChartData): string {
   return chart.buys
@@ -61,6 +61,7 @@ export function ensureClassic(
   meta: { asOf?: string; buysCount: number; positions: PosMap },
 ): PortfolioStore {
   const existing = store.items.find((i) => i.id === CLASSIC_ID)
+  const sameDemo = existing?.fingerprint === fingerprint
   const classic: StoredPortfolio = {
     id: CLASSIC_ID,
     name: 'Classic (demo)',
@@ -69,9 +70,10 @@ export function ensureClassic(
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     asOf: meta.asOf,
     buysCount: meta.buysCount,
-    positions: Object.keys(meta.positions).length
-      ? meta.positions
-      : existing?.positions ?? {},
+    // New demo fingerprint → drop stale long label offsets
+    positions: sameDemo && Object.keys(existing?.positions ?? {}).length
+      ? existing!.positions
+      : meta.positions,
   }
   const others = store.items.filter((i) => i.id !== CLASSIC_ID)
   return {

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -188,14 +188,58 @@ def main() -> None:
     }
     OUT_CHART.write_text(json.dumps(chart))
 
-    # Simple label layout offsets for the demo
+    # Short leader-line layout (mirrors the in-app auto placer)
+    day_ms = 86400000
+    y_gap = 24
+    placed: list[tuple[float, float, float]] = []
+
+    def half_w(label: str) -> float:
+        return max(len(label) * 0.28, 3.2) * day_ms
+
+    def overlaps(lx: float, ly: float, label: str) -> bool:
+        w = half_w(label)
+        return any(
+            abs(lx - plx) < (w + pw) * 0.7 and abs(ly - ply) < y_gap
+            for plx, ply, pw in placed
+        )
+
     positions = {}
-    for i, b in enumerate(buy_pts):
-        t = datetime.strptime(b["date"], "%Y-%m-%d").timestamp() * 1000
-        side = 1 if i % 2 == 0 else -1
+    ordered = sorted(buy_pts, key=lambda x: (x["date"], x["sym"]))
+    for i, b in enumerate(ordered):
+        t = (
+            datetime.strptime(b["date"], "%Y-%m-%d")
+            .replace(tzinfo=timezone.utc)
+            .timestamp()
+            * 1000
+        )
+        y = float(b["y"])
+        near = sum(
+            1
+            for o in ordered[:i]
+            if abs(
+                datetime.strptime(o["date"], "%Y-%m-%d")
+                .replace(tzinfo=timezone.utc)
+                .timestamp()
+                * 1000
+                - t
+            )
+            < 12 * day_ms
+        )
+        prefer_up = near % 2 == 0
+        primary = [14, 22, 30] if prefer_up else [-14, -22, -30]
+        secondary = [-14, -22, -30] if prefer_up else [14, 22, 30]
+        ys = [*primary, *secondary, 40 if prefer_up else -40, -40 if prefer_up else 40]
+        xs = (0.8, 1.3, 1.8, -0.8, 2.2, -1.3)
+        slots = [(t + dx * day_ms, y + dy) for dy in ys for dx in xs]
+        chosen = slots[0]
+        for s in slots:
+            if not overlaps(s[0], s[1], b["label"]):
+                chosen = s
+                break
+        placed.append((chosen[0], chosen[1], half_w(b["label"])))
         positions[b["id"]] = {
-            "lx": t + 3 * 86400000,
-            "ly": round(b["y"] + side * (40 + (i % 3) * 28), 2),
+            "lx": chosen[0],
+            "ly": round(chosen[1], 2),
         }
     payload = {"buys": positions}
     OUT_POS.write_text(json.dumps(payload, indent=2) + "\n")

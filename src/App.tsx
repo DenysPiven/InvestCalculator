@@ -47,17 +47,17 @@ const DEFAULT_LABELS = CHART_LABELS
 
 /** Factory layout for the synthetic Classic demo (not a real portfolio). */
 const FACTORY_POS: PosMap = {
-  'VOO-2026-02-26': { lx: 1772323200000, ly: 40 },
-  'VOO-2026-03-16': { lx: 1773878400000, ly: -65.34 },
-  'QQQ-2026-04-13': { lx: 1776297600000, ly: 96 },
-  'VOO-2026-05-06': { lx: 1778284800000, ly: 91.96 },
-  'SMH-2026-06-01': { lx: 1780531200000, ly: 68 },
-  'VOO-2026-06-25': { lx: 1782604800000, ly: 139.05 },
-  'QQQ-2026-07-20': { lx: 1784764800000, ly: 131.86 },
-  'SMH-2026-08-12': { lx: 1786752000000, ly: -82.52 },
-  'VOO-2026-08-28': { lx: 1788134400000, ly: 422.97 },
-  'QQQ-2026-09-16': { lx: 1789776000000, ly: 56.03 },
-  'SMH-2026-09-30': { lx: 1790985600000, ly: 121.56 },
+  'VOO-2026-02-26': { lx: 1772124480000, ly: 12 },
+  'VOO-2026-03-16': { lx: 1773679680000, ly: 14.66 },
+  'QQQ-2026-04-13': { lx: 1776098880000, ly: 12 },
+  'VOO-2026-05-06': { lx: 1778086080000, ly: 143.96 },
+  'SMH-2026-06-01': { lx: 1780332480000, ly: 12 },
+  'VOO-2026-06-25': { lx: 1782406080000, ly: 247.05 },
+  'QQQ-2026-07-20': { lx: 1784566080000, ly: 103.86 },
+  'SMH-2026-08-12': { lx: 1786553280000, ly: -2.52 },
+  'VOO-2026-08-28': { lx: 1787935680000, ly: 338.97 },
+  'QQQ-2026-09-16': { lx: 1789577280000, ly: 108.03 },
+  'SMH-2026-09-30': { lx: 1790786880000, ly: 65.56 },
 }
 
 function buysToPosMap(buys: Buy[]): PosMap {
@@ -75,33 +75,81 @@ function parseDay(s: string) {
   return new Date(s + 'T00:00:00').getTime()
 }
 
-/** Auto-place buy labels from whatever tickers/dates the statement has. */
+const DAY_MS = 86400000
+
+/** Short leader-line label layout with light collision avoidance. */
 function fallbackBuys(raw: ChartData['buys']): Buy[] {
   if (!raw.length) return []
-  const bySym = new Map<string, ChartData['buys']>()
-  for (const b of raw) {
-    const list = bySym.get(b.sym) ?? []
-    list.push(b)
-    bySym.set(b.sym, list)
-  }
-  const symOffset = new Map<string, number>()
-  ;[...bySym.keys()].sort().forEach((sym, i) => {
-    symOffset.set(sym, (i % 5) * 22)
-  })
-  const counters = new Map<string, number>()
 
-  return raw.map((b) => {
-    const n = counters.get(b.sym) ?? 0
-    counters.set(b.sym, n + 1)
-    const side = n % 2 === 0 ? 1 : -1
-    const stack = Math.floor(n / 2)
-    const base = symOffset.get(b.sym) ?? 0
-    return {
-      ...b,
-      lx: parseDay(b.date) + (2 + stack) * 86400000,
-      ly: b.y + side * (36 + stack * 28 + base),
+  const yGap = 24
+  const placed: { lx: number; ly: number; w: number }[] = []
+
+  const labelHalfWidthMs = (label: string) =>
+    Math.max(label.length * 0.28, 3.2) * DAY_MS
+
+  const overlaps = (lx: number, ly: number, label: string) => {
+    const w = labelHalfWidthMs(label)
+    return placed.some(
+      (p) => Math.abs(lx - p.lx) < (w + p.w) * 0.7 && Math.abs(ly - p.ly) < yGap,
+    )
+  }
+
+  // Prefer nearby slots so leader lines stay short (~1–2 days, ~12–28€).
+  const slotsFor = (t: number, y: number, preferUp: boolean): [number, number][] => {
+    const xs = [0.8, 1.3, 1.8, -0.8, 2.2, -1.3]
+    const primary = preferUp ? [14, 22, 30] : [-14, -22, -30]
+    const secondary = preferUp ? [-14, -22, -30] : [14, 22, 30]
+    const ys = [...primary, ...secondary, preferUp ? 40 : -40, preferUp ? -40 : 40]
+    const out: [number, number][] = []
+    for (const dy of ys) {
+      for (const dx of xs) {
+        out.push([t + dx * DAY_MS, y + dy])
+      }
     }
-  })
+    return out
+  }
+
+  const ordered = [...raw].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.sym.localeCompare(b.sym),
+  )
+  const byId = new Map<string, Buy>()
+
+  for (let i = 0; i < ordered.length; i++) {
+    const b = ordered[i]
+    const t = parseDay(b.date)
+    // Alternate side among buys close in time so clusters don't stack one way
+    const nearIdx = ordered
+      .slice(0, i)
+      .filter((o) => Math.abs(parseDay(o.date) - t) < 12 * DAY_MS).length
+    const preferUp = nearIdx % 2 === 0
+    const slots = slotsFor(t, b.y, preferUp)
+    let chosen = slots[0]
+    for (const s of slots) {
+      if (!overlaps(s[0], s[1], b.label)) {
+        chosen = s
+        break
+      }
+    }
+    // Last resort: keep it close, nudge vertically in small steps
+    if (overlaps(chosen[0], chosen[1], b.label)) {
+      for (let k = 1; k <= 10; k++) {
+        const ly = b.y + (k % 2 === 0 ? 1 : -1) * (16 + k * 10)
+        const lx = t + 1.2 * DAY_MS
+        if (!overlaps(lx, ly, b.label)) {
+          chosen = [lx, ly]
+          break
+        }
+      }
+    }
+    placed.push({
+      lx: chosen[0],
+      ly: chosen[1],
+      w: labelHalfWidthMs(b.label),
+    })
+    byId.set(b.id, { ...b, lx: chosen[0], ly: chosen[1] })
+  }
+
+  return raw.map((b) => byId.get(b.id)!)
 }
 
 function applyPositions(raw: ChartData['buys'], pos: PosMap | null): Buy[] {
@@ -836,7 +884,7 @@ export default function App() {
               const dist = Math.hypot(lx - px, ly - py)
               return (
                 <g key={b.id}>
-                  {dist > 22 && (
+                  {dist > 10 && (
                     <line
                       x1={px}
                       y1={py}
