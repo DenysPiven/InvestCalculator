@@ -898,7 +898,7 @@ export default function App() {
                 const earn = data.series[sym]?.[data.series[sym].length - 1] ?? 0
                 const now = put + earn
                 const putText =
-                  put > 0 ? ` · ${fmtEur(put)} → ${fmtEur(now)}` : ''
+                  put > 0 ? ` · in ${fmtEur(put)} → ${fmtEur(now)}` : ''
                 return (
                   <g
                     key={sym}

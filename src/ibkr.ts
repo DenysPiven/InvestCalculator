@@ -59,6 +59,11 @@ export const CHART_LABELS: Record<string, string> = {
 
 type Trade = { date: string; sym: string; usd: number; qty: number }
 
+function numCell(v: string | undefined): number {
+  if (v == null || v === '') return NaN
+  return Number(String(v).replace(/,/g, ''))
+}
+
 /** Minimal CSV row splitter (handles quoted commas). */
 export function parseCsvLine(line: string): string[] {
   const out: string[] = []
@@ -99,28 +104,62 @@ function isEquitySymbol(sym: string): boolean {
 export function parseIbkrTrades(csvText: string): Trade[] {
   const text = csvText.replace(/^\uFEFF/, '')
   const trades: Trade[] = []
+  // Map header names → column index (IBKR inserts optional columns like Account).
+  let col: Record<string, number> | null = null
+
+  const idx = (name: string) => (col ? col[name] : -1)
+  const cell = (row: string[], name: string) => {
+    const i = idx(name)
+    return i >= 0 ? row[i] : undefined
+  }
+
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue
     const row = parseCsvLine(line)
-    if (
-      row.length < 12 ||
-      row[0] !== 'Trades' ||
-      row[1] !== 'Data' ||
-      row[2] !== 'Order'
-    ) {
+    if (row[0] !== 'Trades') continue
+
+    if (row[1] === 'Header') {
+      col = {}
+      row.forEach((h, i) => {
+        if (h) col![h] = i
+      })
       continue
     }
+
+    if (row[1] !== 'Data' || row[2] !== 'Order' || !col) continue
+
     // Stocks / Equity; some statements label ETFs as Stocks
-    const asset = row[3]
+    const asset = cell(row, 'Asset Category') ?? row[3]
     if (asset !== 'Stocks' && asset !== 'Equity') continue
-    const sym = row[5].trim().toUpperCase()
+
+    // USD book only for now (Yahoo prices + EURUSD path). EUR-listed names need a
+    // separate pipeline; skipping avoids double-converting local-currency proceeds.
+    const ccy = (cell(row, 'Currency') ?? 'USD').toUpperCase()
+    if (ccy !== 'USD') continue
+
+    const sym = (cell(row, 'Symbol') ?? '').trim().toUpperCase()
     if (!isEquitySymbol(sym)) continue
-    const date = row[6].split(',')[0].trim()
+
+    const dateRaw = cell(row, 'Date/Time') ?? ''
+    const date = dateRaw.split(',')[0].trim()
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
-    const qty = Number(String(row[7]).replace(/,/g, ''))
-    const proceeds = Number(String(row[10]).replace(/,/g, ''))
-    if (!(qty > 0) || !Number.isFinite(proceeds)) continue
-    trades.push({ date, sym, usd: -proceeds, qty })
+
+    const qty = numCell(cell(row, 'Quantity'))
+    if (!(qty > 0)) continue
+
+    const proceeds = numCell(cell(row, 'Proceeds'))
+    const comm = numCell(cell(row, 'Comm/Fee'))
+    const basis = numCell(cell(row, 'Basis'))
+    // IBKR Basis for opens = cost including commission; else Proceeds+Comm.
+    // Proceeds/Comm are negative on buys; Basis is positive cost.
+    let usd = NaN
+    if (Number.isFinite(basis) && basis > 0) usd = basis
+    else if (Number.isFinite(proceeds)) {
+      usd = -proceeds + (Number.isFinite(comm) ? -comm : 0)
+    }
+    if (!(usd > 0) || !Number.isFinite(usd)) continue
+
+    trades.push({ date, sym, usd, qty })
   }
   if (!trades.length) {
     throw new Error(
