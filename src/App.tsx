@@ -21,11 +21,13 @@ import {
   deletePortfolio,
   ensureClassic,
   fingerprintFromChart,
+  layoutFor,
   loadStore,
   nameFromFile,
   saveStore,
   setActive,
-  updatePositions,
+  updateDraftPositions,
+  updateSavedPositions,
   upsertUpload,
   type PortfolioStore,
   type PosMap,
@@ -284,34 +286,48 @@ export default function App() {
           def.buys && Object.keys(def.buys).length ? def.buys : FACTORY_POS
         const initial = loadStore()
         const savedClassic = initial.items.find((i) => i.id === CLASSIC_ID)
-        const classicPositions =
+        const classicSeed =
           savedClassic && Object.keys(savedClassic.positions).length
             ? savedClassic.positions
             : factoryOrDefault
         const withClassic = ensureClassic(initial, fingerprintFromChart(classic), {
           asOf: classic.asOf,
           buysCount: classic.buys.length,
-          positions: classicPositions,
+          positions: classicSeed,
         })
-        saveStore(withClassic)
-        setStore(withClassic)
-        storeRef.current = withClassic
+        // First-time classic: seed Save snapshot to factory layout
+        const classicItem = withClassic.items.find((i) => i.id === CLASSIC_ID)!
+        const seeded =
+          Object.keys(classicItem.positions).length === 0
+            ? {
+                ...withClassic,
+                items: withClassic.items.map((i) =>
+                  i.id === CLASSIC_ID
+                    ? {
+                        ...i,
+                        positions: factoryOrDefault,
+                        draftPositions: factoryOrDefault,
+                      }
+                    : i,
+                ),
+              }
+            : withClassic
+        saveStore(seeded)
+        setStore(seeded)
+        storeRef.current = seeded
 
         const activeItem =
-          withClassic.items.find((i) => i.id === withClassic.activeId) ??
-          withClassic.items.find((i) => i.id === CLASSIC_ID)!
+          seeded.items.find((i) => i.id === seeded.activeId) ??
+          seeded.items.find((i) => i.id === CLASSIC_ID)!
 
         if (activeItem.kind === 'upload' && activeItem.chart) {
-          showPortfolio(activeItem.chart, activeItem.positions)
-          setStatusMsg(
-            `Restored “${activeItem.name}” · ${activeItem.buysCount} buys`,
-          )
+          showPortfolio(activeItem.chart, layoutFor(activeItem))
         } else {
-          showPortfolio(classic, activeItem.positions)
+          showPortfolio(classic, layoutFor(activeItem))
         }
         localStorage.removeItem('ibkr-label-positions-v1')
         localStorage.removeItem('ibkr-label-positions-v2')
-        localStorage.removeItem('ibkr-label-positions-v3')
+        localStorage.removeItem('ibkr-portfolios-v2')
       })
       .catch((e) => setStatusMsg(`Failed to load demo data: ${e}`))
   }, [showPortfolio])
@@ -334,17 +350,15 @@ export default function App() {
       commitStore(next)
       const item = next.items.find((i) => i.id === id)!
       if (item.kind === 'classic' && classicChart) {
-        showPortfolio(classicChart, item.positions)
+        showPortfolio(classicChart, layoutFor(item))
       } else if (item.chart) {
-        showPortfolio(item.chart, item.positions)
+        showPortfolio(item.chart, layoutFor(item))
       } else {
-        showPortfolio(normalized, item.positions)
+        showPortfolio(normalized, layoutFor(item))
       }
-      setStatusMsg(
-        reused
-          ? `Same statement as “${item.name}” — switched · ${normalized.tickers.join(', ')} · ${item.buysCount} buys`
-          : `Saved “${item.name}” · ${normalized.tickers.join(', ')} · ${normalized.buys.length} buys · ${normalized.dates[0]} → ${normalized.asOf}`,
-      )
+      if (!reused) {
+        /* new upload — keep quiet */
+      }
     } catch (e) {
       setStatusMsg(`Upload failed: ${e instanceof Error ? e.message : e}`)
     } finally {
@@ -355,23 +369,21 @@ export default function App() {
 
   const selectPortfolio = (item: StoredPortfolio) => {
     if (item.id === storeRef.current.activeId) return
-    // Persist current label layout before switching
+    // Keep current draft when switching away
     const cur = storeRef.current
-    const withPos = updatePositions(
+    const withDraft = updateDraftPositions(
       cur,
       cur.activeId,
       buysToPosMap(buysRef.current),
     )
-    const next = setActive(withPos, item.id)
+    const next = setActive(withDraft, item.id)
     commitStore(next)
+    const fresh = next.items.find((i) => i.id === item.id)
     if (item.kind === 'classic') {
       if (!classicChart) return
-      const classicItem = next.items.find((i) => i.id === CLASSIC_ID)
-      showPortfolio(classicChart, classicItem?.positions ?? FACTORY_POS)
-      setStatusMsg('Classic (demo)')
+      showPortfolio(classicChart, layoutFor(fresh) || FACTORY_POS)
     } else if (item.chart) {
-      showPortfolio(item.chart, item.positions)
-      setStatusMsg(`“${item.name}” · ${item.buysCount} buys`)
+      showPortfolio(item.chart, layoutFor(fresh))
     }
   }
 
@@ -385,10 +397,7 @@ export default function App() {
     commitStore(next)
     if (wasActive && classicChart) {
       const classicItem = next.items.find((i) => i.id === CLASSIC_ID)
-      showPortfolio(classicChart, classicItem?.positions ?? FACTORY_POS)
-      setStatusMsg('Deleted · back to Classic (demo)')
-    } else {
-      setStatusMsg(`Deleted “${item.name}”`)
+      showPortfolio(classicChart, layoutFor(classicItem) || FACTORY_POS)
     }
   }
 
@@ -474,14 +483,18 @@ export default function App() {
       if (!current.length) return
       const gen = ++saveGen.current
       const map = buysToPosMap(current)
-      const next = updatePositions(
-        storeRef.current,
-        storeRef.current.activeId,
-        map,
-      )
+      const id = storeRef.current.activeId
+      const next =
+        reason === 'manual'
+          ? updateSavedPositions(storeRef.current, id, map)
+          : updateDraftPositions(storeRef.current, id, map)
       commitStore(next)
 
-      if (import.meta.env.DEV && storeRef.current.activeId === CLASSIC_ID) {
+      if (
+        reason === 'manual' &&
+        import.meta.env.DEV &&
+        id === CLASSIC_ID
+      ) {
         try {
           await fetch('/api/save-positions', {
             method: 'POST',
@@ -514,13 +527,27 @@ export default function App() {
     if (!data) return
     saveGen.current += 1
     dragRef.current = null
-    const nextBuys = applyPositions(
-      data.buys,
-      storeRef.current.activeId === CLASSIC_ID ? FACTORY_POS : null,
+    const item = storeRef.current.items.find(
+      (i) => i.id === storeRef.current.activeId,
     )
+    const saved = item?.positions
+    const fallback =
+      item?.kind === 'classic' || storeRef.current.activeId === CLASSIC_ID
+        ? FACTORY_POS
+        : null
+    const restore =
+      saved && Object.keys(saved).length ? saved : fallback
+    const nextBuys = applyPositions(data.buys, restore)
     buysRef.current = nextBuys
     setBuys(nextBuys)
-    void saveLayout('reset', nextBuys)
+    // Sync draft back to the Save snapshot (do not overwrite Save)
+    commitStore(
+      updateDraftPositions(
+        storeRef.current,
+        storeRef.current.activeId,
+        buysToPosMap(nextBuys),
+      ),
+    )
   }
 
   const exportPng = async () => {

@@ -12,7 +12,10 @@ export type StoredPortfolio = {
   createdAt: string
   asOf?: string
   buysCount: number
+  /** Last explicit Save — what Reset restores. */
   positions: PosMap
+  /** Working layout after drags (survives refresh). */
+  draftPositions?: PosMap
   /** Full chart for uploads; classic reloads from chart_data.json */
   chart?: ChartData
 }
@@ -23,7 +26,7 @@ export type PortfolioStore = {
 }
 
 export const CLASSIC_ID = 'classic'
-export const PORTFOLIOS_KEY = 'ibkr-portfolios-v2'
+export const PORTFOLIOS_KEY = 'ibkr-portfolios-v3'
 
 export function fingerprintFromChart(chart: ChartData): string {
   return chart.buys
@@ -34,7 +37,9 @@ export function fingerprintFromChart(chart: ChartData): string {
 
 export function loadStore(): PortfolioStore {
   try {
-    const raw = localStorage.getItem(PORTFOLIOS_KEY)
+    const raw =
+      localStorage.getItem(PORTFOLIOS_KEY) ??
+      localStorage.getItem('ibkr-portfolios-v2')
     if (!raw) {
       return { activeId: CLASSIC_ID, items: [] }
     }
@@ -55,6 +60,14 @@ export function saveStore(store: PortfolioStore) {
   localStorage.setItem(PORTFOLIOS_KEY, JSON.stringify(store))
 }
 
+export function layoutFor(item: StoredPortfolio | undefined): PosMap {
+  if (!item) return {}
+  if (item.draftPositions && Object.keys(item.draftPositions).length) {
+    return item.draftPositions
+  }
+  return item.positions ?? {}
+}
+
 export function ensureClassic(
   store: PortfolioStore,
   fingerprint: string,
@@ -70,10 +83,11 @@ export function ensureClassic(
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     asOf: meta.asOf,
     buysCount: meta.buysCount,
-    // New demo fingerprint → drop stale long label offsets
-    positions: sameDemo && Object.keys(existing?.positions ?? {}).length
-      ? existing!.positions
-      : meta.positions,
+    positions:
+      sameDemo && Object.keys(existing?.positions ?? {}).length
+        ? existing!.positions
+        : meta.positions,
+    draftPositions: sameDemo ? existing?.draftPositions : undefined,
   }
   const others = store.items.filter((i) => i.id !== CLASSIC_ID)
   return {
@@ -109,8 +123,10 @@ export function upsertUpload(
       asOf: input.chart.asOf,
       buysCount: input.chart.buys.length,
       chart: input.chart,
-      // Fresh auto layout on re-upload (short leader lines)
-      positions: input.positions,
+      // Keep last Save; only seed positions if somehow empty
+      positions: Object.keys(existing.positions).length
+        ? existing.positions
+        : input.positions,
     }
     return {
       store: {
@@ -132,6 +148,7 @@ export function upsertUpload(
     asOf: input.chart.asOf,
     buysCount: input.chart.buys.length,
     positions: input.positions,
+    draftPositions: input.positions,
     chart: input.chart,
   }
   return {
@@ -160,7 +177,8 @@ export function setActive(store: PortfolioStore, id: string): PortfolioStore {
   return { ...store, activeId: id }
 }
 
-export function updatePositions(
+/** Explicit Save — Reset target. */
+export function updateSavedPositions(
   store: PortfolioStore,
   id: string,
   positions: PosMap,
@@ -168,7 +186,21 @@ export function updatePositions(
   return {
     ...store,
     items: store.items.map((i) =>
-      i.id === id ? { ...i, positions } : i,
+      i.id === id ? { ...i, positions, draftPositions: positions } : i,
+    ),
+  }
+}
+
+/** Drag / working layout only. */
+export function updateDraftPositions(
+  store: PortfolioStore,
+  id: string,
+  draftPositions: PosMap,
+): PortfolioStore {
+  return {
+    ...store,
+    items: store.items.map((i) =>
+      i.id === id ? { ...i, draftPositions } : i,
     ),
   }
 }
