@@ -14,13 +14,10 @@ export type ChartData = {
   dates: string[]
   /** Equity tickers present in this portfolio (from CSV or demo). */
   tickers: string[]
-  /** Counterfactual benchmark symbol (prefer VOO when prices exist). */
-  baseline: string
   series: Record<string, number[]>
   buys: BuyPoint[]
   colors: Record<string, string>
   labels: Record<string, string>
-  deltaAllVoo: number
   title: string
   source?: string
 }
@@ -46,7 +43,6 @@ export const CHART_COLORS: Record<string, string> = {
   QQQ: '#9467bd',
   SMH: '#8c564b',
   TOTAL: '#2ca02c',
-  ALL_VOO: '#d62728',
 }
 
 export const CHART_LABELS: Record<string, string> = {
@@ -54,7 +50,6 @@ export const CHART_LABELS: Record<string, string> = {
   QQQ: 'QQQ',
   SMH: 'SMH',
   TOTAL: 'TOTAL',
-  ALL_VOO: 'if all → VOO',
 }
 
 type Trade = { date: string; sym: string; usd: number; qty: number }
@@ -173,12 +168,11 @@ export function seriesKeys(data: ChartData): string[] {
   const tickers = data.tickers?.length
     ? data.tickers
     : Object.keys(data.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
-  return [...tickers, 'TOTAL', 'ALL_VOO']
+  return [...tickers, 'TOTAL']
 }
 
 export function colorFor(sym: string, index = 0): string {
   if (sym === 'TOTAL') return CHART_COLORS.TOTAL
-  if (sym === 'ALL_VOO') return CHART_COLORS.ALL_VOO
   if (CHART_COLORS[sym]) return CHART_COLORS[sym]
   return PALETTE[index % PALETTE.length]
 }
@@ -381,24 +375,6 @@ function ffill(map: Map<string, number>, days: string[]): number[] {
   return out
 }
 
-async function pickBaseline(
-  tickers: string[],
-  startIso: string,
-  endIso: string,
-): Promise<{ baseline: string; map: Map<string, number> }> {
-  // Prefer VOO as the "if all → …" benchmark when prices exist.
-  const preferred = ['VOO', ...tickers.filter((t) => t !== 'VOO')]
-  for (const sym of preferred) {
-    try {
-      const map = await fetchYahooCloses(sym, startIso, endIso)
-      if (map.size) return { baseline: sym, map }
-    } catch {
-      /* try next */
-    }
-  }
-  throw new Error(`No benchmark prices for tickers: ${tickers.join(', ')}`)
-}
-
 export async function buildChartFromIbkrCsv(
   csvText: string,
   opts?: { endDate?: string },
@@ -413,17 +389,10 @@ export async function buildChartFromIbkrCsv(
 
   const padStart = isoFromMs(dayMs(start) - 2 * 86400000)
   const fxMap = await fetchEurUsd(padStart, end)
-  const { baseline, map: baselineMap } = await pickBaseline(
-    tickers,
-    padStart,
-    end,
-  )
 
   const priceMaps = new Map<string, Map<string, number>>()
-  priceMaps.set(baseline, baselineMap)
   await Promise.all(
     tickers.map(async (sym) => {
-      if (priceMaps.has(sym)) return
       priceMaps.set(sym, await fetchYahooCloses(sym, padStart, end))
     }),
   )
@@ -431,7 +400,7 @@ export async function buildChartFromIbkrCsv(
   const days = eachDay(start, end)
   const fx = ffill(fxMap, days)
   const px: Record<string, number[]> = {}
-  for (const sym of new Set([...tickers, baseline])) {
+  for (const sym of tickers) {
     px[sym] = ffill(priceMaps.get(sym)!, days)
   }
 
@@ -450,9 +419,6 @@ export async function buildChartFromIbkrCsv(
     tickers.map((t) => [t, [] as number[]]),
   )
   const buys: BuyPoint[] = []
-  const allBase: number[] = []
-  let altShares = 0
-  let altInvested = 0
 
   days.forEach((d, i) => {
     const rate = fx[i]
@@ -482,36 +448,11 @@ export async function buildChartFromIbkrCsv(
       if (prevHold === 0 && hold[sym] > 0) earn = 0
       series[sym].push(Math.round(earn * 100) / 100)
     }
-
-    // Counterfactual: keep real baseline fills; redirect other cash into baseline.
-    const prevAlt = altShares
-    const baseBuy = buysAgg.get(`${d}|${baseline}`)
-    if (baseBuy) {
-      altShares += baseBuy.qty
-      altInvested += baseBuy.usd / rate
-    }
-    let otherUsd = 0
-    for (const sym of tickers) {
-      if (sym === baseline) continue
-      otherUsd += buysAgg.get(`${d}|${sym}`)?.usd ?? 0
-    }
-    if (otherUsd > 0) {
-      altShares += otherUsd / px[baseline][i]
-      altInvested += otherUsd / rate
-    }
-    let altEarn = altShares
-      ? (altShares * px[baseline][i]) / rate - altInvested
-      : 0
-    if (prevAlt === 0 && altShares > 0) altEarn = 0
-    allBase.push(Math.round(altEarn * 100) / 100)
   })
 
   const total = days.map((_, i) =>
     Math.round(tickers.reduce((s, t) => s + series[t][i], 0) * 100) / 100,
   )
-  const deltaAllVoo =
-    Math.round((allBase[allBase.length - 1] - total[total.length - 1]) * 100) /
-    100
 
   const endDate = new Date(end + 'T00:00:00')
   const titleDay = `${endDate.getUTCDate()} ${endDate.toLocaleString('en-US', {
@@ -526,11 +467,9 @@ export async function buildChartFromIbkrCsv(
 
   const colors: Record<string, string> = {
     TOTAL: CHART_COLORS.TOTAL,
-    ALL_VOO: CHART_COLORS.ALL_VOO,
   }
   const labels: Record<string, string> = {
     TOTAL: 'TOTAL',
-    ALL_VOO: `if all → ${baseline}`,
   }
   tickers.forEach((t, i) => {
     colors[t] = colorFor(t, i)
@@ -541,16 +480,13 @@ export async function buildChartFromIbkrCsv(
     asOf: end,
     dates: days,
     tickers,
-    baseline,
     series: {
       ...series,
       TOTAL: total,
-      ALL_VOO: allBase,
     },
     buys,
     colors,
     labels,
-    deltaAllVoo,
     title: `Earnings + buys (${tickers.join(', ')}) · ${startDay} → ${titleDay}`,
     source: 'upload',
   }

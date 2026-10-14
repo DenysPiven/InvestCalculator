@@ -20,14 +20,12 @@ COLORS = {
     "QQQ": "#9467bd",
     "SMH": "#8c564b",
     "TOTAL": "#2ca02c",
-    "ALL_VOO": "#d62728",
 }
 LABELS = {
     "VOO": "VOO",
     "QQQ": "QQQ",
     "SMH": "SMH",
     "TOTAL": "TOTAL",
-    "ALL_VOO": "if all → VOO",
 }
 
 # Deterministic fake DCA schedule: (offset_days_from_start, symbol, eur_amount)
@@ -113,9 +111,6 @@ def main() -> None:
     inv = {t: 0.0 for t in TICKERS}
     series = {t: [] for t in TICKERS}
     buy_pts = []
-    alt_shares = 0.0
-    alt_invested = 0.0
-    all_voo: list[float] = []
 
     for i, d in enumerate(days):
         rate = fx[i]
@@ -142,32 +137,10 @@ def main() -> None:
                 earn = 0.0
             series[sym].append(round(earn, 2))
 
-        prev_alt = alt_shares
-        voo_b = buys_agg.get((d, "VOO"))
-        if voo_b:
-            alt_shares += voo_b["qty"]
-            alt_invested += voo_b["eur"]
-        other_usd = sum(
-            buys_agg[(d, s)]["usd"] for s in ("QQQ", "SMH") if (d, s) in buys_agg
-        )
-        if other_usd:
-            alt_shares += other_usd / px["VOO"][i]
-            alt_invested += other_usd / rate
-        if alt_shares:
-            alt_earn = (
-                0.0
-                if prev_alt == 0
-                else alt_shares * px["VOO"][i] / rate - alt_invested
-            )
-        else:
-            alt_earn = 0.0
-        all_voo.append(round(alt_earn, 2))
-
     total = [
         round(series["VOO"][i] + series["QQQ"][i] + series["SMH"][i], 2)
         for i in range(len(days))
     ]
-    delta = round(all_voo[-1] - total[-1], 2)
     title_day = f"{end.day} {end.strftime('%b %Y')}"
 
     start_title = f"{start.day} {start.strftime('%b %Y')}"
@@ -176,12 +149,10 @@ def main() -> None:
         "source": "demo",
         "dates": days,
         "tickers": TICKERS,
-        "baseline": "VOO",
-        "series": {**series, "TOTAL": total, "ALL_VOO": all_voo},
-        "deltaAllVoo": delta,
+        "series": {**series, "TOTAL": total},
         "buys": buy_pts,
         "colors": COLORS,
-        "labels": {**LABELS, "ALL_VOO": "if all → VOO"},
+        "labels": LABELS,
         "title": (
             f"Demo earnings ({', '.join(TICKERS)}) · {start_title} → {title_day}"
         ),

@@ -191,8 +191,6 @@ function investedBySeries(data: ChartData): Record<string, number> {
   return {
     ...bySym,
     TOTAL: total,
-    // Same cash, redirected into the baseline
-    ALL_VOO: total,
   }
 }
 
@@ -201,35 +199,30 @@ function normalizeChart(d: ChartData): ChartData {
     d.tickers?.length
       ? d.tickers
       : Object.keys(d.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
-  const baseline = d.baseline || (tickers.includes('VOO') ? 'VOO' : tickers[0] || 'VOO')
   const colors: Record<string, string> = {
     ...CHART_COLORS,
     ...d.colors,
     TOTAL: d.colors?.TOTAL ?? CHART_COLORS.TOTAL,
-    ALL_VOO: d.colors?.ALL_VOO ?? CHART_COLORS.ALL_VOO,
   }
   const labels: Record<string, string> = {
     ...CHART_LABELS,
     ...d.labels,
     TOTAL: d.labels?.TOTAL ?? 'TOTAL',
-    ALL_VOO: d.labels?.ALL_VOO ?? `if all → ${baseline}`,
   }
+  delete colors.ALL_VOO
+  delete labels.ALL_VOO
   tickers.forEach((t, i) => {
     colors[t] = colors[t] ?? colorFor(t, i)
     labels[t] = labels[t] ?? t
   })
+  const series = { ...d.series }
+  delete series.ALL_VOO
   return {
     ...d,
     tickers,
-    baseline,
+    series,
     colors,
     labels,
-    deltaAllVoo:
-      d.deltaAllVoo ??
-      (d.series.ALL_VOO && d.series.TOTAL
-        ? d.series.ALL_VOO[d.series.ALL_VOO.length - 1] -
-          d.series.TOTAL[d.series.TOTAL.length - 1]
-        : 0),
   }
 }
 
@@ -636,12 +629,6 @@ export default function App() {
   const nameOf = (sym: string) =>
     data.labels?.[sym] ?? DEFAULT_LABELS[sym] ?? sym
   const invested = investedBySeries(data)
-  const delta =
-    data.deltaAllVoo ??
-    (data.series.ALL_VOO
-      ? data.series.ALL_VOO[data.series.ALL_VOO.length - 1] -
-        data.series.TOTAL[data.series.TOTAL.length - 1]
-      : 0)
 
   const paths = seriesOrder
     .filter((sym) => visible[sym] !== false && data.series[sym])
@@ -895,8 +882,7 @@ export default function App() {
                 fill="none"
                 points={pts}
                 stroke={data.colors[sym]}
-                strokeWidth={sym === 'TOTAL' || sym === 'ALL_VOO' ? 2.4 : 1.8}
-                strokeDasharray={sym === 'ALL_VOO' ? '7 4' : undefined}
+                strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
               />
             ))}
 
@@ -919,8 +905,7 @@ export default function App() {
                       y1={0}
                       y2={0}
                       stroke={data.colors[sym]}
-                      strokeWidth={sym === 'TOTAL' || sym === 'ALL_VOO' ? 2.4 : 1.8}
-                      strokeDasharray={sym === 'ALL_VOO' ? '7 4' : undefined}
+                      strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
                     />
                     <text x={24} y={4} fontSize={12} fill="#1c1917">
                       {nameOf(sym)}
@@ -1032,33 +1017,6 @@ export default function App() {
                 )
               })}
 
-            {visible.TOTAL !== false &&
-              visible.ALL_VOO !== false &&
-              data.series.ALL_VOO &&
-              Math.abs(delta) >= 1 && (
-                <g>
-                  <rect
-                    x={M.left + PLOT_W - 168}
-                    y={M.top + 8}
-                    width={156}
-                    height={28}
-                    rx={6}
-                    fill="#fff5f5"
-                    stroke={data.colors.ALL_VOO}
-                    strokeWidth={1.2}
-                  />
-                  <text
-                    x={M.left + PLOT_W - 90}
-                    y={M.top + 27}
-                    textAnchor="middle"
-                    fontSize={12}
-                    fontWeight={700}
-                    fill={data.colors.ALL_VOO}
-                  >
-                    {`diff vs TOTAL: ${fmtEnd(delta)}`}
-                  </text>
-                </g>
-              )}
           </svg>
         </div>
       </div>

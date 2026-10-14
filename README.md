@@ -5,7 +5,7 @@ Portfolio earnings chart in the browser:
 - Upload a brokerage **Activity Statement** CSV (Interactive Brokers format)
 - Keep a synthetic **Classic (demo)** chart plus your private uploads in a left sidebar (uploads stay in browser `localStorage` only; trash to delete)
 - Drag buy-point labels (saved per portfolio)
-- Toggle series / **if all → baseline**
+- Toggle series
 - Export PNG
 
 Live (GitHub Pages): after enabling Pages,  
