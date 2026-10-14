@@ -30,7 +30,7 @@ Open [http://127.0.0.1:43127](http://127.0.0.1:43127).
 ## Data
 
 - **Price cache:** `public/prices_cache.json` holds ~10y daily closes for VOO / QQQ / SMH / EURUSD. Refresh locally with `npm run update-prices` (incremental) or `npm run update-prices:full`. CI also refreshes the cache before each Pages deploy.
-- **Upload:** client parses the IBKR Trades section, uses the bundled cache, and only fetches the missing tail (Frankfurter FX in the browser; Yahoo via Vite proxy in local dev). Earnings = value − invested (€); open day starts at €0.
+- **Upload:** client reads whichever equity tickers / dates / amounts are in the IBKR Trades section, builds matching series, and sets the time axis from first buy → today. Prices come from the bundled cache (add more with `python3 scripts/update_prices_cache.py --symbols SPY,IWM`). Earnings = value − invested (€); open day starts at €0.
 - **Classic demo:** synthetic buys in `public/chart_data.json` (regenerate with `python3 scripts/generate_demo_chart.py`). Not a real brokerage statement.
 - **Your uploads** never leave the browser; they are not committed to the repo.
 
