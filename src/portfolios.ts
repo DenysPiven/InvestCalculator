@@ -109,10 +109,8 @@ export function upsertUpload(
       asOf: input.chart.asOf,
       buysCount: input.chart.buys.length,
       chart: input.chart,
-      // keep user's label layout if same buys
-      positions: Object.keys(existing.positions).length
-        ? existing.positions
-        : input.positions,
+      // Fresh auto layout on re-upload (short leader lines)
+      positions: input.positions,
     }
     return {
       store: {
