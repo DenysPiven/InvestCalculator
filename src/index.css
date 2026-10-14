@@ -154,15 +154,15 @@ body {
   text-align: center;
 }
 
-.sidebar-hint {
-  margin: 12px 4px 0;
-  font-size: 0.75rem;
-  color: #78716c;
-  line-height: 1.35;
-}
-
 .main {
   min-width: 0;
+}
+
+.error-msg {
+  margin: 0;
+  width: 100%;
+  color: #b91c1c;
+  font-size: 0.9rem;
 }
 
 .toolbar {
@@ -281,12 +281,6 @@ button:disabled {
 
 .label-hit:active {
   cursor: grabbing;
-}
-
-.status {
-  margin-top: 10px;
-  color: #57534e;
-  font-size: 0.85rem;
 }
 
 @media (max-width: 860px) {

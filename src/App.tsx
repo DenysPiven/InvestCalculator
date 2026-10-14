@@ -208,7 +208,6 @@ export default function App() {
   const [classicChart, setClassicChart] = useState<ChartData | null>(null)
   const [buys, setBuys] = useState<Buy[]>([])
   const [active, setActiveLabel] = useState<string | null>(null)
-  const [saveMsg, setSaveMsg] = useState('')
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
@@ -461,7 +460,7 @@ export default function App() {
   }
 
   const saveLayout = useCallback(
-    async (reason: string, snapshot?: Buy[]) => {
+    async (_reason: string, snapshot?: Buy[]) => {
       const current = snapshot ?? buysRef.current
       if (!current.length) return
       const gen = ++saveGen.current
@@ -485,7 +484,6 @@ export default function App() {
         }
       }
       if (gen !== saveGen.current) return
-      setSaveMsg(`Saved ${Object.keys(map).length} labels (${reason})`)
     },
     [commitStore],
   )
@@ -513,7 +511,6 @@ export default function App() {
     buysRef.current = nextBuys
     setBuys(nextBuys)
     void saveLayout('reset', nextBuys)
-    setSaveMsg('Reset label layout')
   }
 
   const exportPng = async () => {
@@ -556,10 +553,6 @@ export default function App() {
     a.download = 'ibkr_earnings_with_buys.png'
     a.click()
   }
-
-  const activePortfolio =
-    store.items.find((i) => i.id === store.activeId) ??
-    store.items.find((i) => i.id === CLASSIC_ID)
 
   if (!data || !scales) {
     return (
@@ -685,10 +678,6 @@ export default function App() {
             )
           })}
         </ul>
-        <p className="sidebar-hint">
-          Uploads stay in this browser. Identical statements reuse the same
-          entry.
-        </p>
       </aside>
 
       <div className="main">
@@ -717,16 +706,10 @@ export default function App() {
             hidden
             onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
           />
-          <p>
-            {activePortfolio
-              ? `Active: ${activePortfolio.name}. `
-              : ''}
-            Tickers & dates follow the uploaded statement.
-            Drag labels · toggle series · dashed = if all → {data.baseline}
-            {data.deltaAllVoo != null ? ` (${fmtEnd(delta)} vs TOTAL)` : ''}.
-            {statusMsg ? ` · ${statusMsg}` : ''}
-            {saveMsg ? ` · ${saveMsg}` : ''}
-          </p>
+          {statusMsg.startsWith('Upload failed') ||
+          statusMsg.startsWith('Failed to load') ? (
+            <p className="error-msg">{statusMsg}</p>
+          ) : null}
         </div>
 
         <div className="toggles" role="group" aria-label="Series visibility">
@@ -982,10 +965,6 @@ export default function App() {
               )}
           </svg>
         </div>
-        <p className="status">
-          Tip: switch portfolios in the left list. Trash icon deletes an upload.
-          Label positions are saved per portfolio in this browser.
-        </p>
       </div>
     </div>
   )
