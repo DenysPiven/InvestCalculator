@@ -210,6 +210,7 @@ export default function App() {
   const [active, setActiveLabel] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
   const [visible, setVisible] = useState<Record<string, boolean>>({})
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -699,6 +700,15 @@ export default function App() {
           <button type="button" className="primary" onClick={exportPng}>
             Export PNG
           </button>
+          <button
+            type="button"
+            className={`toggle-labels${showLabels ? ' on' : ''}`}
+            onClick={() => setShowLabels((v) => !v)}
+            aria-pressed={showLabels}
+            title={showLabels ? 'Hide buy labels' : 'Show buy labels'}
+          >
+            Labels
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -867,7 +877,7 @@ export default function App() {
               const dist = Math.hypot(lx - px, ly - py)
               return (
                 <g key={b.id}>
-                  {dist > 10 && (
+                  {showLabels && dist > 10 && (
                     <line
                       x1={px}
                       y1={py}
@@ -885,58 +895,62 @@ export default function App() {
                     stroke="#fff"
                     strokeWidth={1}
                   />
-                  <g
-                    className="label-hit"
-                    transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}
-                    onPointerDown={(e) => onPointerDown(e, b.id)}
-                  >
-                    <rect
-                      width={tw}
-                      height={th}
-                      rx={4}
-                      fill="#fff"
-                      stroke={color}
-                      strokeWidth={active === b.id ? 1.6 : 0.9}
-                      opacity={0.95}
-                    />
-                    <text
-                      x={tw / 2}
-                      y={th / 2 + 4}
-                      textAnchor="middle"
-                      fontSize={11}
-                      fontWeight={700}
-                      fill={color}
-                      style={{ pointerEvents: 'none' }}
+                  {showLabels && (
+                    <g
+                      className="label-hit"
+                      transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}
+                      onPointerDown={(e) => onPointerDown(e, b.id)}
                     >
-                      {b.label}
-                    </text>
-                  </g>
+                      <rect
+                        width={tw}
+                        height={th}
+                        rx={4}
+                        fill="#fff"
+                        stroke={color}
+                        strokeWidth={active === b.id ? 1.6 : 0.9}
+                        opacity={0.95}
+                      />
+                      <text
+                        x={tw / 2}
+                        y={th / 2 + 4}
+                        textAnchor="middle"
+                        fontSize={11}
+                        fontWeight={700}
+                        fill={color}
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        {b.label}
+                      </text>
+                    </g>
+                  )}
                 </g>
               )
             })}
 
-            {seriesOrder
-              .filter((sym) => visible[sym] !== false && data.series[sym])
-              .map((sym) => {
-                const val = data.series[sym][data.series[sym].length - 1]
-                const color = data.colors[sym] ?? colorFor(sym)
-                const text = `${nameOf(sym)} ${fmtEnd(val)}`
-                return (
-                  <text
-                    key={`end-${sym}`}
-                    x={endX}
-                    y={yScale(val) + 4}
-                    fontSize={12}
-                    fontWeight={700}
-                    fill={color}
-                    textAnchor="start"
-                  >
-                    {text}
-                  </text>
-                )
-              })}
+            {showLabels &&
+              seriesOrder
+                .filter((sym) => visible[sym] !== false && data.series[sym])
+                .map((sym) => {
+                  const val = data.series[sym][data.series[sym].length - 1]
+                  const color = data.colors[sym] ?? colorFor(sym)
+                  const text = `${nameOf(sym)} ${fmtEnd(val)}`
+                  return (
+                    <text
+                      key={`end-${sym}`}
+                      x={endX}
+                      y={yScale(val) + 4}
+                      fontSize={12}
+                      fontWeight={700}
+                      fill={color}
+                      textAnchor="start"
+                    >
+                      {text}
+                    </text>
+                  )
+                })}
 
-            {visible.TOTAL !== false &&
+            {showLabels &&
+              visible.TOTAL !== false &&
               visible.ALL_VOO !== false &&
               data.series.ALL_VOO &&
               Math.abs(delta) >= 1 && (

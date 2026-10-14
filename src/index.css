@@ -216,6 +216,21 @@ button.primary:hover {
   background: #16382c;
 }
 
+button.toggle-labels {
+  margin-left: auto;
+  min-width: 5.5rem;
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+button.toggle-labels.on {
+  border-style: solid;
+  opacity: 1;
+  background: #fff;
+  border-color: #1f4e3d;
+  color: #1f4e3d;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: wait;
