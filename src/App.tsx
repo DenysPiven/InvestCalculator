@@ -168,7 +168,7 @@ function fmtEnd(v: number) {
   return `${sign}${Math.round(v)}€`
 }
 
-function fmtInvested(v: number) {
+function fmtEur(v: number) {
   return `€${Math.round(v)}`
 }
 
@@ -894,9 +894,11 @@ export default function App() {
             {seriesOrder
               .filter((sym) => visible[sym] !== false && data.series[sym])
               .map((sym, i) => {
-                const put = invested[sym]
+                const put = invested[sym] ?? 0
+                const earn = data.series[sym]?.[data.series[sym].length - 1] ?? 0
+                const now = put + earn
                 const putText =
-                  put != null && put > 0 ? ` · ${fmtInvested(put)}` : ''
+                  put > 0 ? ` · ${fmtEur(put)} → ${fmtEur(now)}` : ''
                 return (
                   <g
                     key={sym}
