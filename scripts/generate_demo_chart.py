@@ -170,17 +170,20 @@ def main() -> None:
     delta = round(all_voo[-1] - total[-1], 2)
     title_day = f"{end.day} {end.strftime('%b %Y')}"
 
+    start_title = f"{start.day} {start.strftime('%b %Y')}"
     chart = {
         "asOf": end.isoformat(),
         "source": "demo",
         "dates": days,
+        "tickers": TICKERS,
+        "baseline": "VOO",
         "series": {**series, "TOTAL": total, "ALL_VOO": all_voo},
         "deltaAllVoo": delta,
         "buys": buy_pts,
         "colors": COLORS,
-        "labels": LABELS,
+        "labels": {**LABELS, "ALL_VOO": "if all → VOO"},
         "title": (
-            f"Demo earnings + buy points (synthetic) · through {title_day}"
+            f"Demo earnings ({', '.join(TICKERS)}) · {start_title} → {title_day}"
         ),
     }
     OUT_CHART.write_text(json.dumps(chart))

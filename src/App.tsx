@@ -12,8 +12,9 @@ import {
   buildChartFromIbkrCsv,
   CHART_COLORS,
   CHART_LABELS,
+  colorFor,
+  seriesKeys,
   type ChartData,
-  type SeriesKey,
 } from './ibkr'
 import {
   CLASSIC_ID,
@@ -42,7 +43,6 @@ type Buy = {
   ly: number
 }
 
-const SERIES_ORDER: SeriesKey[] = ['VOO', 'QQQ', 'SMH', 'TOTAL', 'ALL_VOO']
 const DEFAULT_LABELS = CHART_LABELS
 
 /** Factory layout for the synthetic Classic demo (not a real portfolio). */
@@ -75,35 +75,32 @@ function parseDay(s: string) {
   return new Date(s + 'T00:00:00').getTime()
 }
 
+/** Auto-place buy labels from whatever tickers/dates the statement has. */
 function fallbackBuys(raw: ChartData['buys']): Buy[] {
-  const cluster = raw.filter((b) => b.sym === 'QQQ' || b.sym === 'SMH')
-  const sorted = [...cluster].sort((a, b) => a.date.localeCompare(b.date))
-  const split = Math.ceil(sorted.length / 2)
-  const leftIds = new Set(sorted.slice(0, split).map((b) => b.id))
-  const leftX = parseDay(sorted[0]?.date ?? raw[0].date) - 5 * 86400000
-  const rightX =
-    parseDay(sorted[sorted.length - 1]?.date ?? raw[0].date) + 5 * 86400000
-  const leftYs = [230, 120, 10]
-  const rightYs = [30, -90, -210]
-  let li = 0
-  let ri = 0
+  if (!raw.length) return []
+  const bySym = new Map<string, ChartData['buys']>()
+  for (const b of raw) {
+    const list = bySym.get(b.sym) ?? []
+    list.push(b)
+    bySym.set(b.sym, list)
+  }
+  const symOffset = new Map<string, number>()
+  ;[...bySym.keys()].sort().forEach((sym, i) => {
+    symOffset.set(sym, (i % 5) * 22)
+  })
+  const counters = new Map<string, number>()
 
-  return raw.map((b, i) => {
-    if (b.sym === 'VOO') {
-      return {
-        ...b,
-        lx: parseDay(b.date) + 86400000,
-        ly: b.y + (i % 2 === 0 ? 48 : -48),
-      }
+  return raw.map((b) => {
+    const n = counters.get(b.sym) ?? 0
+    counters.set(b.sym, n + 1)
+    const side = n % 2 === 0 ? 1 : -1
+    const stack = Math.floor(n / 2)
+    const base = symOffset.get(b.sym) ?? 0
+    return {
+      ...b,
+      lx: parseDay(b.date) + (2 + stack) * 86400000,
+      ly: b.y + side * (36 + stack * 28 + base),
     }
-    if (leftIds.has(b.id)) {
-      const ly = leftYs[li] ?? 230 - li * 100
-      li += 1
-      return { ...b, lx: leftX, ly }
-    }
-    const ly = rightYs[ri] ?? 30 - ri * 120
-    ri += 1
-    return { ...b, lx: rightX, ly }
   })
 }
 
@@ -122,10 +119,33 @@ function fmtEnd(v: number) {
 }
 
 function normalizeChart(d: ChartData): ChartData {
+  const tickers =
+    d.tickers?.length
+      ? d.tickers
+      : Object.keys(d.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
+  const baseline = d.baseline || (tickers.includes('VOO') ? 'VOO' : tickers[0] || 'VOO')
+  const colors: Record<string, string> = {
+    ...CHART_COLORS,
+    ...d.colors,
+    TOTAL: d.colors?.TOTAL ?? CHART_COLORS.TOTAL,
+    ALL_VOO: d.colors?.ALL_VOO ?? CHART_COLORS.ALL_VOO,
+  }
+  const labels: Record<string, string> = {
+    ...CHART_LABELS,
+    ...d.labels,
+    TOTAL: d.labels?.TOTAL ?? 'TOTAL',
+    ALL_VOO: d.labels?.ALL_VOO ?? `if all → ${baseline}`,
+  }
+  tickers.forEach((t, i) => {
+    colors[t] = colors[t] ?? colorFor(t, i)
+    labels[t] = labels[t] ?? t
+  })
   return {
     ...d,
-    colors: { ...CHART_COLORS, ...d.colors },
-    labels: { ...CHART_LABELS, ...d.labels },
+    tickers,
+    baseline,
+    colors,
+    labels,
     deltaAllVoo:
       d.deltaAllVoo ??
       (d.series.ALL_VOO && d.series.TOTAL
@@ -144,13 +164,7 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
-  const [visible, setVisible] = useState<Record<SeriesKey, boolean>>({
-    VOO: true,
-    QQQ: true,
-    SMH: true,
-    TOTAL: true,
-    ALL_VOO: true,
-  })
+  const [visible, setVisible] = useState<Record<string, boolean>>({})
   const fileRef = useRef<HTMLInputElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const buysRef = useRef<Buy[]>([])
@@ -182,6 +196,13 @@ export default function App() {
     (chart: ChartData, positions: PosMap | null) => {
       const normalized = normalizeChart(chart)
       setData(normalized)
+      setVisible((prev) => {
+        const next: Record<string, boolean> = {}
+        for (const k of seriesKeys(normalized)) {
+          next[k] = prev[k] ?? true
+        }
+        return next
+      })
       const nextBuys = applyPositions(
         normalized.buys,
         positions && Object.keys(positions).length ? positions : null,
@@ -192,7 +213,7 @@ export default function App() {
     [],
   )
 
-  const toggleSeries = (sym: SeriesKey) => {
+  const toggleSeries = (sym: string) => {
     setVisible((v) => ({ ...v, [sym]: !v[sym] }))
   }
 
@@ -271,8 +292,8 @@ export default function App() {
       }
       setStatusMsg(
         reused
-          ? `Same statement as “${item.name}” — switched to it · ${item.buysCount} buys`
-          : `Saved “${item.name}” · ${normalized.buys.length} buys · as of ${normalized.asOf}`,
+          ? `Same statement as “${item.name}” — switched · ${normalized.tickers.join(', ')} · ${item.buysCount} buys`
+          : `Saved “${item.name}” · ${normalized.tickers.join(', ')} · ${normalized.buys.length} buys · ${normalized.dates[0]} → ${normalized.asOf}`,
       )
     } catch (e) {
       setStatusMsg(`Upload failed: ${e instanceof Error ? e.message : e}`)
@@ -323,22 +344,30 @@ export default function App() {
 
   const scales = useMemo(() => {
     if (!data) return null
+    const keys = seriesKeys(data)
     const xs = data.dates.map(parseDay)
-    const xMin = xs[0] - 3 * 86400000
-    const xMax = xs[xs.length - 1] + 28 * 86400000
-    const endYs = SERIES_ORDER.map((s) => data.series[s][data.series[s].length - 1])
+    // Pad time axis from data span (auto: a few days before / after)
+    const span = Math.max(xs[xs.length - 1] - xs[0], 7 * 86400000)
+    const pad = Math.min(Math.max(span * 0.04, 2 * 86400000), 21 * 86400000)
+    const xMin = xs[0] - pad
+    const xMax = xs[xs.length - 1] + pad * 2.2
+    const endYs = keys
+      .filter((s) => data.series[s]?.length)
+      .map((s) => data.series[s][data.series[s].length - 1])
     const allY = [
       ...Object.values(data.series).flat(),
       ...buys.map((b) => b.ly),
       ...endYs,
-      -450,
-      230,
+      0,
     ]
-    const yMin = Math.min(...allY) - 60
-    const yMax = Math.max(...allY) + 80
+    const rawMin = Math.min(...allY)
+    const rawMax = Math.max(...allY)
+    const padY = Math.max((rawMax - rawMin) * 0.12, 40)
+    const yMin = rawMin - padY
+    const yMax = rawMax + padY
     const xScale = (t: number) => M.left + ((t - xMin) / (xMax - xMin)) * PLOT_W
     const yScale = (v: number) => M.top + ((yMax - v) / (yMax - yMin)) * PLOT_H
-    return { xs, xMin, xMax, yMin, yMax, xScale, yScale }
+    return { xs, xMin, xMax, yMin, yMax, xScale, yScale, keys }
   }, [data, buys])
 
   const clientToSvg = useCallback((clientX: number, clientY: number) => {
@@ -495,10 +524,11 @@ export default function App() {
     )
   }
 
-  const { xScale, yScale, yMin, yMax } = scales
+  const { xScale, yScale, yMin, yMax, keys: seriesOrder } = scales
   const zeroY = yScale(0)
   const endX = M.left + PLOT_W + 8
-  const nameOf = (sym: SeriesKey) => data.labels?.[sym] ?? DEFAULT_LABELS[sym]
+  const nameOf = (sym: string) =>
+    data.labels?.[sym] ?? DEFAULT_LABELS[sym] ?? sym
   const delta =
     data.deltaAllVoo ??
     (data.series.ALL_VOO
@@ -506,8 +536,9 @@ export default function App() {
         data.series.TOTAL[data.series.TOTAL.length - 1]
       : 0)
 
-  const paths = SERIES_ORDER.filter((sym) => visible[sym] && data.series[sym]).map(
-    (sym) => {
+  const paths = seriesOrder
+    .filter((sym) => visible[sym] !== false && data.series[sym])
+    .map((sym) => {
       const pts = data.dates
         .map(
           (d, i) =>
@@ -515,8 +546,7 @@ export default function App() {
         )
         .join(' ')
       return { sym, pts }
-    },
-  )
+    })
 
   const months: { t: number; label: string }[] = []
   {
@@ -533,7 +563,12 @@ export default function App() {
   }
 
   const yTicks = []
-  for (let v = Math.ceil(yMin / 200) * 200; v <= yMax; v += 200) yTicks.push(v)
+  {
+    const span = yMax - yMin
+    const step =
+      span > 2000 ? 500 : span > 800 ? 200 : span > 300 ? 100 : span > 120 ? 50 : 25
+    for (let v = Math.ceil(yMin / step) * step; v <= yMax; v += step) yTicks.push(v)
+  }
 
   return (
     <div className="app">
@@ -638,7 +673,8 @@ export default function App() {
             {activePortfolio
               ? `Active: ${activePortfolio.name}. `
               : ''}
-            Drag labels · toggle series · red dashed = if all → VOO
+            Tickers & dates follow the uploaded statement.
+            Drag labels · toggle series · dashed = if all → {data.baseline}
             {data.deltaAllVoo != null ? ` (${fmtEnd(delta)} vs TOTAL)` : ''}.
             {statusMsg ? ` · ${statusMsg}` : ''}
             {saveMsg ? ` · ${saveMsg}` : ''}
@@ -646,14 +682,18 @@ export default function App() {
         </div>
 
         <div className="toggles" role="group" aria-label="Series visibility">
-          {SERIES_ORDER.map((sym) => (
+          {seriesOrder.map((sym) => (
             <button
               key={sym}
               type="button"
-              className={`toggle${visible[sym] ? ' on' : ''}`}
-              style={{ '--c': data.colors[sym] ?? '#444' } as CSSProperties}
+              className={`toggle${visible[sym] !== false ? ' on' : ''}`}
+              style={
+                {
+                  '--c': data.colors[sym] ?? colorFor(sym),
+                } as CSSProperties
+              }
               onClick={() => toggleSeries(sym)}
-              aria-pressed={visible[sym]}
+              aria-pressed={visible[sym] !== false}
             >
               <span className="swatch" />
               {nameOf(sym)}
@@ -750,8 +790,9 @@ export default function App() {
               />
             ))}
 
-            {SERIES_ORDER.filter((sym) => visible[sym] && data.series[sym]).map(
-              (sym, i) => (
+            {seriesOrder
+              .filter((sym) => visible[sym] !== false && data.series[sym])
+              .map((sym, i) => (
                 <g
                   key={sym}
                   transform={`translate(${M.left + 8}, ${M.top + 14 + i * 18})`}
@@ -769,8 +810,7 @@ export default function App() {
                     {nameOf(sym)}
                   </text>
                 </g>
-              ),
-            )}
+              ))}
 
             <text
               x={18}
@@ -783,13 +823,13 @@ export default function App() {
               €
             </text>
 
-            {buys.filter((b) => visible[b.sym as SeriesKey]).map((b) => {
-              const sym = b.sym as SeriesKey
+            {buys.filter((b) => visible[b.sym] !== false).map((b) => {
+              const sym = b.sym
               const px = xScale(parseDay(b.date))
               const py = yScale(b.y)
               const lx = xScale(b.lx)
               const ly = yScale(b.ly)
-              const color = data.colors[sym]
+              const color = data.colors[sym] ?? colorFor(sym)
               const padX = 6
               const tw = b.label.length * 6.4 + padX * 2
               const th = 18
@@ -844,10 +884,11 @@ export default function App() {
               )
             })}
 
-            {SERIES_ORDER.filter((sym) => visible[sym] && data.series[sym]).map(
-              (sym) => {
+            {seriesOrder
+              .filter((sym) => visible[sym] !== false && data.series[sym])
+              .map((sym) => {
                 const val = data.series[sym][data.series[sym].length - 1]
-                const color = data.colors[sym]
+                const color = data.colors[sym] ?? colorFor(sym)
                 const text = `${nameOf(sym)} ${fmtEnd(val)}`
                 return (
                   <text
@@ -862,11 +903,10 @@ export default function App() {
                     {text}
                   </text>
                 )
-              },
-            )}
+              })}
 
-            {visible.TOTAL &&
-              visible.ALL_VOO &&
+            {visible.TOTAL !== false &&
+              visible.ALL_VOO !== false &&
               data.series.ALL_VOO &&
               Math.abs(delta) >= 1 && (
                 <g>

@@ -38,11 +38,13 @@ def series_to_map(s: pd.Series) -> dict[str, float]:
     return out
 
 
-def download_range(start: date, end: date) -> dict[str, dict[str, float]]:
+def download_range(
+    symbols: list[str], start: date, end: date
+) -> dict[str, dict[str, float]]:
     # yfinance end is exclusive-ish; pad a day
     end_excl = end + timedelta(days=1)
     raw = yf.download(
-        SYMBOLS,
+        symbols,
         start=start.isoformat(),
         end=end_excl.isoformat(),
         progress=False,
@@ -55,11 +57,11 @@ def download_range(start: date, end: date) -> dict[str, dict[str, float]]:
     if isinstance(raw.columns, pd.MultiIndex):
         close = raw["Close"]
     else:
-        close = raw[["Close"]].rename(columns={"Close": SYMBOLS[0]})
+        close = raw[["Close"]].rename(columns={"Close": symbols[0]})
 
     close.index = pd.to_datetime(close.index).tz_localize(None).normalize()
     result: dict[str, dict[str, float]] = {}
-    for sym in SYMBOLS:
+    for sym in symbols:
         if sym not in close.columns:
             result[sym] = {}
             continue
@@ -86,6 +88,12 @@ def main() -> None:
         default=None,
         help="End date YYYY-MM-DD (default: today UTC)",
     )
+    ap.add_argument(
+        "--symbols",
+        type=str,
+        default="",
+        help="Comma-separated extra symbols to include (e.g. SPY,IWM)",
+    )
     args = ap.parse_args()
 
     end = (
@@ -94,10 +102,12 @@ def main() -> None:
         else date.today()
     )
     existing = load_existing()
+    extra = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    symbols = list(dict.fromkeys([*SYMBOLS, *existing["prices"].keys(), *extra]))
 
     if args.incremental:
         lasts = []
-        for sym in SYMBOLS:
+        for sym in symbols:
             keys = sorted(existing["prices"].get(sym, {}))
             if keys:
                 lasts.append(datetime.strptime(keys[-1], "%Y-%m-%d").date())
@@ -108,19 +118,19 @@ def main() -> None:
     else:
         start = end - timedelta(days=365 * args.years)
 
-    print(f"fetching {SYMBOLS} {start} → {end}")
-    fresh = download_range(start, end)
+    print(f"fetching {symbols} {start} → {end}")
+    fresh = download_range(symbols, start, end)
 
-    for sym in SYMBOLS:
+    for sym in symbols:
+        existing["prices"].setdefault(sym, {})
         existing["prices"][sym].update(fresh.get(sym, {}))
-        # keep sorted insert order for readability
         existing["prices"][sym] = dict(sorted(existing["prices"][sym].items()))
 
     existing["asOf"] = end.isoformat()
     existing["updatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(existing, separators=(",", ":")))
-    sizes = {s: len(existing["prices"][s]) for s in SYMBOLS}
+    sizes = {s: len(existing["prices"][s]) for s in symbols}
     kb = OUT.stat().st_size / 1024
     print(f"wrote {OUT} ({kb:.1f} KiB) asOf={existing['asOf']} counts={sizes}")
 

@@ -1,7 +1,5 @@
 /** Parse IBKR Activity Statement CSV and build EUR earnings series in the browser. */
 
-export type SeriesKey = 'VOO' | 'QQQ' | 'SMH' | 'TOTAL' | 'ALL_VOO'
-
 export type BuyPoint = {
   id: string
   date: string
@@ -14,18 +12,36 @@ export type BuyPoint = {
 export type ChartData = {
   asOf?: string
   dates: string[]
-  series: Record<SeriesKey, number[]>
+  /** Equity tickers present in this portfolio (from CSV or demo). */
+  tickers: string[]
+  /** Counterfactual benchmark symbol (prefer VOO when prices exist). */
+  baseline: string
+  series: Record<string, number[]>
   buys: BuyPoint[]
-  colors: Record<SeriesKey, string>
-  labels: Record<SeriesKey, string>
+  colors: Record<string, string>
+  labels: Record<string, string>
   deltaAllVoo: number
   title: string
   source?: string
 }
 
-const TICKERS = ['VOO', 'QQQ', 'SMH'] as const
+/** @deprecated use string series keys; kept for older call sites */
+export type SeriesKey = string
 
-export const CHART_COLORS: Record<SeriesKey, string> = {
+const PALETTE = [
+  '#1f77b4',
+  '#9467bd',
+  '#8c564b',
+  '#e377c2',
+  '#17becf',
+  '#ff7f0e',
+  '#bcbd22',
+  '#7f7f7f',
+  '#aec7e8',
+  '#c5b0d5',
+]
+
+export const CHART_COLORS: Record<string, string> = {
   VOO: '#1f77b4',
   QQQ: '#9467bd',
   SMH: '#8c564b',
@@ -33,7 +49,7 @@ export const CHART_COLORS: Record<SeriesKey, string> = {
   ALL_VOO: '#d62728',
 }
 
-export const CHART_LABELS: Record<SeriesKey, string> = {
+export const CHART_LABELS: Record<string, string> = {
   VOO: 'VOO',
   QQQ: 'QQQ',
   SMH: 'SMH',
@@ -72,6 +88,14 @@ export function parseCsvLine(line: string): string[] {
   return out
 }
 
+function isEquitySymbol(sym: string): boolean {
+  // IBKR stock/ETF symbols; skip FX pairs and odd cash markers
+  if (!sym || sym.length > 12) return false
+  if (sym.includes('=')) return false
+  if (sym.includes(' ')) return false
+  return /^[A-Z][A-Z0-9./^-]*$/.test(sym)
+}
+
 export function parseIbkrTrades(csvText: string): Trade[] {
   const text = csvText.replace(/^\uFEFF/, '')
   const trades: Trade[] = []
@@ -82,14 +106,17 @@ export function parseIbkrTrades(csvText: string): Trade[] {
       row.length < 12 ||
       row[0] !== 'Trades' ||
       row[1] !== 'Data' ||
-      row[2] !== 'Order' ||
-      row[3] !== 'Stocks'
+      row[2] !== 'Order'
     ) {
       continue
     }
-    const sym = row[5]
-    if (!(TICKERS as readonly string[]).includes(sym)) continue
+    // Stocks / Equity; some statements label ETFs as Stocks
+    const asset = row[3]
+    if (asset !== 'Stocks' && asset !== 'Equity') continue
+    const sym = row[5].trim().toUpperCase()
+    if (!isEquitySymbol(sym)) continue
     const date = row[6].split(',')[0].trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
     const qty = Number(String(row[7]).replace(/,/g, ''))
     const proceeds = Number(String(row[10]).replace(/,/g, ''))
     if (!(qty > 0) || !Number.isFinite(proceeds)) continue
@@ -101,6 +128,20 @@ export function parseIbkrTrades(csvText: string): Trade[] {
     )
   }
   return trades
+}
+
+export function seriesKeys(data: ChartData): string[] {
+  const tickers = data.tickers?.length
+    ? data.tickers
+    : Object.keys(data.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
+  return [...tickers, 'TOTAL', 'ALL_VOO']
+}
+
+export function colorFor(sym: string, index = 0): string {
+  if (sym === 'TOTAL') return CHART_COLORS.TOTAL
+  if (sym === 'ALL_VOO') return CHART_COLORS.ALL_VOO
+  if (CHART_COLORS[sym]) return CHART_COLORS[sym]
+  return PALETTE[index % PALETTE.length]
 }
 
 function dayMs(iso: string) {
@@ -194,7 +235,7 @@ function parseYahooCloses(data: {
   return map
 }
 
-/** Live Yahoo only via Vite dev proxy (GitHub Pages has no CORS path). */
+/** Live Yahoo via Vite dev proxy (GitHub Pages has no CORS path). */
 async function fetchLiveYahooCloses(
   symbol: string,
   startIso: string,
@@ -211,10 +252,6 @@ async function fetchLiveYahooCloses(
   }
 }
 
-/**
- * Daily closes from the 10y bundled cache; only requests the missing gap
- * after (or before) the cache when running in local Vite.
- */
 async function fetchYahooCloses(
   symbol: string,
   startIso: string,
@@ -224,13 +261,11 @@ async function fetchYahooCloses(
   const ext = mapExtent(cached)
 
   if (ext) {
-    // Tail gap: only fetch days after the last cached close.
     if (endIso > ext.last) {
       const gapStart = isoFromMs(dayMs(ext.last) - 2 * 86400000)
       const live = await fetchLiveYahooCloses(symbol, gapStart, endIso)
       if (live) mergeMaps(cached, live)
     }
-    // Head gap (rare with a 10y cache).
     if (startIso < ext.first) {
       const live = await fetchLiveYahooCloses(symbol, startIso, ext.first)
       if (live) mergeMaps(cached, live)
@@ -242,13 +277,12 @@ async function fetchYahooCloses(
 
   if (!cached.size) {
     throw new Error(
-      `No prices for ${symbol} (${startIso}…${endIso}). Run: python3 scripts/update_prices_cache.py`,
+      `No prices for ${symbol} (${startIso}…${endIso}). Add it with: python3 scripts/update_prices_cache.py --symbols ${symbol}`,
     )
   }
   return cached
 }
 
-/** EUR→USD (USD per EUR): cache first, Frankfurter only for the new tail. */
 async function fetchEurUsd(
   startIso: string,
   endIso: string,
@@ -275,7 +309,7 @@ async function fetchEurUsd(
       if (r?.USD) cached.set(d, r.USD)
     }
   } catch {
-    /* keep cache / Yahoo gap below */
+    /* keep cache */
   }
 
   if (ext && endIso > ext.last) {
@@ -294,7 +328,6 @@ async function fetchEurUsd(
 function ffill(map: Map<string, number>, days: string[]): number[] {
   const out: number[] = []
   let last = NaN
-  // seed from first known on/before start
   for (const d of [...map.keys()].sort()) {
     if (d <= days[0]) last = map.get(d)!
   }
@@ -309,32 +342,58 @@ function ffill(map: Map<string, number>, days: string[]): number[] {
   return out
 }
 
+async function pickBaseline(
+  tickers: string[],
+  startIso: string,
+  endIso: string,
+): Promise<{ baseline: string; map: Map<string, number> }> {
+  // Prefer VOO as the "if all → …" benchmark when prices exist.
+  const preferred = ['VOO', ...tickers.filter((t) => t !== 'VOO')]
+  for (const sym of preferred) {
+    try {
+      const map = await fetchYahooCloses(sym, startIso, endIso)
+      if (map.size) return { baseline: sym, map }
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error(`No benchmark prices for tickers: ${tickers.join(', ')}`)
+}
+
 export async function buildChartFromIbkrCsv(
   csvText: string,
   opts?: { endDate?: string },
 ): Promise<ChartData> {
   const trades = parseIbkrTrades(csvText)
+  const tickers = [...new Set(trades.map((t) => t.sym))].sort()
   const tradeDates = trades.map((t) => t.date).sort()
   const start = tradeDates[0]
+  const lastTrade = tradeDates[tradeDates.length - 1]
   const today = new Date().toISOString().slice(0, 10)
-  const end = opts?.endDate ?? (today > tradeDates[tradeDates.length - 1]
-    ? today
-    : tradeDates[tradeDates.length - 1])
+  const end = opts?.endDate ?? (today > lastTrade ? today : lastTrade)
 
   const padStart = isoFromMs(dayMs(start) - 2 * 86400000)
-  const [fxMap, vooMap, qqqMap, smhMap] = await Promise.all([
-    fetchEurUsd(padStart, end),
-    fetchYahooCloses('VOO', padStart, end),
-    fetchYahooCloses('QQQ', padStart, end),
-    fetchYahooCloses('SMH', padStart, end),
-  ])
+  const fxMap = await fetchEurUsd(padStart, end)
+  const { baseline, map: baselineMap } = await pickBaseline(
+    tickers,
+    padStart,
+    end,
+  )
+
+  const priceMaps = new Map<string, Map<string, number>>()
+  priceMaps.set(baseline, baselineMap)
+  await Promise.all(
+    tickers.map(async (sym) => {
+      if (priceMaps.has(sym)) return
+      priceMaps.set(sym, await fetchYahooCloses(sym, padStart, end))
+    }),
+  )
 
   const days = eachDay(start, end)
   const fx = ffill(fxMap, days)
-  const px: Record<(typeof TICKERS)[number], number[]> = {
-    VOO: ffill(vooMap, days),
-    QQQ: ffill(qqqMap, days),
-    SMH: ffill(smhMap, days),
+  const px: Record<string, number[]> = {}
+  for (const sym of new Set([...tickers, baseline])) {
+    px[sym] = ffill(priceMaps.get(sym)!, days)
   }
 
   const buysAgg = new Map<string, { usd: number; qty: number }>()
@@ -345,29 +404,26 @@ export async function buildChartFromIbkrCsv(
     cur.qty += t.qty
     buysAgg.set(key, cur)
   }
-  const hold: Record<string, number> = { VOO: 0, QQQ: 0, SMH: 0 }
-  const inv: Record<string, number> = { VOO: 0, QQQ: 0, SMH: 0 }
-  const series: Record<(typeof TICKERS)[number], number[]> = {
-    VOO: [],
-    QQQ: [],
-    SMH: [],
-  }
+
+  const hold: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
+  const inv: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
+  const series: Record<string, number[]> = Object.fromEntries(
+    tickers.map((t) => [t, [] as number[]]),
+  )
   const buys: BuyPoint[] = []
-  const allVoo: number[] = []
+  const allBase: number[] = []
   let altShares = 0
   let altInvested = 0
 
   days.forEach((d, i) => {
     const rate = fx[i]
-    for (const sym of TICKERS) {
+    for (const sym of tickers) {
       const prevHold = hold[sym]
-      const key = `${d}|${sym}`
-      const b = buysAgg.get(key)
+      const b = buysAgg.get(`${d}|${sym}`)
       if (b) {
         const eur = b.usd / rate
         hold[sym] += b.qty
         inv[sym] += eur
-        // Open day: mark at cost so the series starts at 0 (not EOD vs fill).
         const earn =
           prevHold === 0
             ? 0
@@ -387,57 +443,76 @@ export async function buildChartFromIbkrCsv(
       if (prevHold === 0 && hold[sym] > 0) earn = 0
       series[sym].push(Math.round(earn * 100) / 100)
     }
-    // Counterfactual: keep real VOO fills as-is; only redirect non-VOO cash into VOO
-    // at that day's VOO price. When the portfolio is VOO-only, ALL_VOO == VOO.
+
+    // Counterfactual: keep real baseline fills; redirect other cash into baseline.
     const prevAlt = altShares
-    const vooBuy = buysAgg.get(`${d}|VOO`)
-    if (vooBuy) {
-      altShares += vooBuy.qty
-      altInvested += vooBuy.usd / rate
+    const baseBuy = buysAgg.get(`${d}|${baseline}`)
+    if (baseBuy) {
+      altShares += baseBuy.qty
+      altInvested += baseBuy.usd / rate
     }
     let otherUsd = 0
-    for (const sym of TICKERS) {
-      if (sym === 'VOO') continue
+    for (const sym of tickers) {
+      if (sym === baseline) continue
       otherUsd += buysAgg.get(`${d}|${sym}`)?.usd ?? 0
     }
     if (otherUsd > 0) {
-      altShares += otherUsd / px.VOO[i]
+      altShares += otherUsd / px[baseline][i]
       altInvested += otherUsd / rate
     }
     let altEarn = altShares
-      ? (altShares * px.VOO[i]) / rate - altInvested
+      ? (altShares * px[baseline][i]) / rate - altInvested
       : 0
     if (prevAlt === 0 && altShares > 0) altEarn = 0
-    allVoo.push(Math.round(altEarn * 100) / 100)
+    allBase.push(Math.round(altEarn * 100) / 100)
   })
 
   const total = days.map((_, i) =>
-    Math.round((series.VOO[i] + series.QQQ[i] + series.SMH[i]) * 100) / 100,
+    Math.round(tickers.reduce((s, t) => s + series[t][i], 0) * 100) / 100,
   )
   const deltaAllVoo =
-    Math.round((allVoo[allVoo.length - 1] - total[total.length - 1]) * 100) /
+    Math.round((allBase[allBase.length - 1] - total[total.length - 1]) * 100) /
     100
+
   const endDate = new Date(end + 'T00:00:00')
   const titleDay = `${endDate.getUTCDate()} ${endDate.toLocaleString('en-US', {
     month: 'short',
     timeZone: 'UTC',
   })} ${endDate.getUTCFullYear()}`
+  const startDate = new Date(start + 'T00:00:00')
+  const startDay = `${startDate.getUTCDate()} ${startDate.toLocaleString('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  })} ${startDate.getUTCFullYear()}`
+
+  const colors: Record<string, string> = {
+    TOTAL: CHART_COLORS.TOTAL,
+    ALL_VOO: CHART_COLORS.ALL_VOO,
+  }
+  const labels: Record<string, string> = {
+    TOTAL: 'TOTAL',
+    ALL_VOO: `if all → ${baseline}`,
+  }
+  tickers.forEach((t, i) => {
+    colors[t] = colorFor(t, i)
+    labels[t] = t
+  })
 
   return {
     asOf: end,
     dates: days,
+    tickers,
+    baseline,
     series: {
-      VOO: series.VOO,
-      QQQ: series.QQQ,
-      SMH: series.SMH,
+      ...series,
       TOTAL: total,
-      ALL_VOO: allVoo,
+      ALL_VOO: allBase,
     },
     buys,
-    colors: CHART_COLORS,
-    labels: CHART_LABELS,
+    colors,
+    labels,
     deltaAllVoo,
-    title: `Earnings + buy points (ticker & amount in €) · through ${titleDay}`,
+    title: `Earnings + buys (${tickers.join(', ')}) · ${startDay} → ${titleDay}`,
     source: 'upload',
   }
 }
