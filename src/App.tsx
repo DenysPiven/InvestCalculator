@@ -171,7 +171,7 @@ function fmtEnd(v: number) {
 function fmtPct(earn: number, invested: number) {
   if (!(invested > 0) || !Number.isFinite(earn)) return ''
   const pct = (earn / invested) * 100
-  const sign = pct >= 0 ? '+' : ''
+  const sign = pct >= 0 ? '+' : '-'
   const abs = Math.abs(pct)
   const body = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1)
   return `${sign}${body}%`
