@@ -1,4 +1,4 @@
-# InvestCalculator
+# Invest Calculator
 
 Portfolio earnings chart in the browser:
 

@@ -595,7 +595,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="toolbar">
-          <h1>InvestCalculator</h1>
+          <h1>Invest Calculator</h1>
           <p>Loading chart data…</p>
         </div>
       </div>
@@ -719,7 +719,7 @@ export default function App() {
 
       <div className="main">
         <div className="toolbar">
-          <h1>InvestCalculator</h1>
+          <h1>Invest Calculator</h1>
           <button type="button" onClick={reset}>
             Reset positions
           </button>
