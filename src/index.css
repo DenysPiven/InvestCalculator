@@ -216,6 +216,12 @@ button.primary:hover {
   background: #16382c;
 }
 
+button.saved {
+  background: #1f4e3d;
+  border-color: #1f4e3d;
+  color: #faf7f0;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: wait;

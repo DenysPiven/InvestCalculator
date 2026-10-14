@@ -211,6 +211,8 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [saveFlash, setSaveFlash] = useState(false)
+  const saveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
   const [visible, setVisible] = useState<Record<string, boolean>>({})
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -460,8 +462,14 @@ export default function App() {
     )
   }
 
+  const flashSaved = useCallback(() => {
+    setSaveFlash(true)
+    if (saveFlashTimer.current) clearTimeout(saveFlashTimer.current)
+    saveFlashTimer.current = setTimeout(() => setSaveFlash(false), 1600)
+  }, [])
+
   const saveLayout = useCallback(
-    async (_reason: string, snapshot?: Buy[]) => {
+    async (reason: string, snapshot?: Buy[]) => {
       const current = snapshot ?? buysRef.current
       if (!current.length) return
       const gen = ++saveGen.current
@@ -485,8 +493,9 @@ export default function App() {
         }
       }
       if (gen !== saveGen.current) return
+      if (reason === 'manual') flashSaved()
     },
-    [commitStore],
+    [commitStore, flashSaved],
   )
 
   const onPointerUp = () => {
@@ -687,8 +696,12 @@ export default function App() {
           <button type="button" onClick={reset}>
             Reset positions
           </button>
-          <button type="button" onClick={() => void saveLayout('manual')}>
-            Save layout
+          <button
+            type="button"
+            className={saveFlash ? 'saved' : undefined}
+            onClick={() => void saveLayout('manual')}
+          >
+            {saveFlash ? 'Saved' : 'Save layout'}
           </button>
           <button
             type="button"
