@@ -23,6 +23,10 @@ export type ChartData = {
   deltaAllVoo: number
   title: string
   source?: string
+  /** First day each ticker had a position (for avg/BE guides). */
+  holdFrom?: Record<string, string>
+  /** Volume-weighted average fill price (USD) per ticker. */
+  avgCostUsd?: Record<string, number>
 }
 
 /** @deprecated use string series keys; kept for older call sites */
@@ -407,6 +411,10 @@ export async function buildChartFromIbkrCsv(
 
   const hold: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
   const inv: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
+  const costUsd: Record<string, number> = Object.fromEntries(
+    tickers.map((t) => [t, 0]),
+  )
+  const holdFrom: Record<string, string> = {}
   const series: Record<string, number[]> = Object.fromEntries(
     tickers.map((t) => [t, [] as number[]]),
   )
@@ -424,6 +432,8 @@ export async function buildChartFromIbkrCsv(
         const eur = b.usd / rate
         hold[sym] += b.qty
         inv[sym] += eur
+        costUsd[sym] += b.usd
+        if (!holdFrom[sym]) holdFrom[sym] = d
         const earn =
           prevHold === 0
             ? 0
@@ -498,6 +508,11 @@ export async function buildChartFromIbkrCsv(
     labels[t] = t
   })
 
+  const avgCostUsd: Record<string, number> = {}
+  for (const t of tickers) {
+    if (hold[t] > 0) avgCostUsd[t] = Math.round((costUsd[t] / hold[t]) * 100) / 100
+  }
+
   return {
     asOf: end,
     dates: days,
@@ -512,6 +527,8 @@ export async function buildChartFromIbkrCsv(
     colors,
     labels,
     deltaAllVoo,
+    holdFrom,
+    avgCostUsd,
     title: `Earnings + buys (${tickers.join(', ')}) · ${startDay} → ${titleDay}`,
     source: 'upload',
   }

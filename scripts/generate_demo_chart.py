@@ -111,6 +111,8 @@ def main() -> None:
 
     hold = {t: 0.0 for t in TICKERS}
     inv = {t: 0.0 for t in TICKERS}
+    cost_usd = {t: 0.0 for t in TICKERS}
+    hold_from: dict[str, str] = {}
     series = {t: [] for t in TICKERS}
     buy_pts = []
     alt_shares = 0.0
@@ -125,6 +127,8 @@ def main() -> None:
             if b:
                 hold[sym] += b["qty"]
                 inv[sym] += b["eur"]
+                cost_usd[sym] += b["usd"]
+                hold_from.setdefault(sym, d)
                 earn = 0.0 if prev == 0 else hold[sym] * px[sym][i] / rate - inv[sym]
                 buy_pts.append(
                     {
@@ -171,6 +175,9 @@ def main() -> None:
     title_day = f"{end.day} {end.strftime('%b %Y')}"
 
     start_title = f"{start.day} {start.strftime('%b %Y')}"
+    avg_cost = {
+        t: round(cost_usd[t] / hold[t], 2) for t in TICKERS if hold[t] > 0
+    }
     chart = {
         "asOf": end.isoformat(),
         "source": "demo",
@@ -182,6 +189,8 @@ def main() -> None:
         "buys": buy_pts,
         "colors": COLORS,
         "labels": {**LABELS, "ALL_VOO": "if all → VOO"},
+        "holdFrom": hold_from,
+        "avgCostUsd": avg_cost,
         "title": (
             f"Demo earnings ({', '.join(TICKERS)}) · {start_title} → {title_day}"
         ),

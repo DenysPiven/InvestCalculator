@@ -49,17 +49,17 @@ const DEFAULT_LABELS = CHART_LABELS
 
 /** Factory layout for the synthetic Classic demo (not a real portfolio). */
 const FACTORY_POS: PosMap = {
-  'VOO-2026-02-26': { lx: 1772124480000, ly: 12 },
-  'VOO-2026-03-16': { lx: 1773679680000, ly: 14.66 },
-  'QQQ-2026-04-13': { lx: 1776098880000, ly: 12 },
-  'VOO-2026-05-06': { lx: 1778086080000, ly: 143.96 },
-  'SMH-2026-06-01': { lx: 1780332480000, ly: 12 },
-  'VOO-2026-06-25': { lx: 1782406080000, ly: 247.05 },
-  'QQQ-2026-07-20': { lx: 1784566080000, ly: 103.86 },
-  'SMH-2026-08-12': { lx: 1786553280000, ly: -2.52 },
-  'VOO-2026-08-28': { lx: 1787935680000, ly: 338.97 },
-  'QQQ-2026-09-16': { lx: 1789577280000, ly: 108.03 },
-  'SMH-2026-09-30': { lx: 1790786880000, ly: 65.56 },
+  'VOO-2026-02-26': { lx: 1772133120000, ly: 14 },
+  'VOO-2026-03-16': { lx: 1773688320000, ly: 16.66 },
+  'QQQ-2026-04-13': { lx: 1776107520000, ly: 14 },
+  'VOO-2026-05-06': { lx: 1778094720000, ly: 145.96 },
+  'SMH-2026-06-01': { lx: 1780341120000, ly: 14 },
+  'VOO-2026-06-25': { lx: 1782414720000, ly: 249.05 },
+  'QQQ-2026-07-20': { lx: 1784574720000, ly: 105.86 },
+  'SMH-2026-08-12': { lx: 1786561920000, ly: -0.52 },
+  'VOO-2026-08-28': { lx: 1787944320000, ly: 340.97 },
+  'QQQ-2026-09-16': { lx: 1789585920000, ly: 110.03 },
+  'SMH-2026-09-30': { lx: 1790795520000, ly: 67.56 },
 }
 
 function buysToPosMap(buys: Buy[]): PosMap {
@@ -168,6 +168,15 @@ function fmtEnd(v: number) {
   return `${sign}${Math.round(v)}€`
 }
 
+function deriveHoldFrom(d: ChartData): Record<string, string> {
+  if (d.holdFrom && Object.keys(d.holdFrom).length) return d.holdFrom
+  const out: Record<string, string> = {}
+  for (const b of d.buys ?? []) {
+    if (!out[b.sym] || b.date < out[b.sym]) out[b.sym] = b.date
+  }
+  return out
+}
+
 function normalizeChart(d: ChartData): ChartData {
   const tickers =
     d.tickers?.length
@@ -196,6 +205,8 @@ function normalizeChart(d: ChartData): ChartData {
     baseline,
     colors,
     labels,
+    holdFrom: deriveHoldFrom(d),
+    avgCostUsd: d.avgCostUsd ?? {},
     deltaAllVoo:
       d.deltaAllVoo ??
       (d.series.ALL_VOO && d.series.TOTAL
@@ -213,6 +224,7 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [showAvgLines, setShowAvgLines] = useState(true)
   const [saveFlash, setSaveFlash] = useState(false)
   const saveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
@@ -771,15 +783,29 @@ export default function App() {
               {nameOf(sym)}
             </button>
           ))}
-          <label className="switch" title="Buy labels on the chart">
-            <input
-              type="checkbox"
-              checked={showLabels}
-              onChange={(e) => setShowLabels(e.target.checked)}
-            />
-            <span className="switch-track" aria-hidden />
-            <span className="switch-text">Buy labels</span>
-          </label>
+          <div className="switch-group">
+            <label className="switch" title="Buy labels on the chart">
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden />
+              <span className="switch-text">Buy labels</span>
+            </label>
+            <label
+              className="switch"
+              title="Break-even guides at 0€ with average fill price"
+            >
+              <input
+                type="checkbox"
+                checked={showAvgLines}
+                onChange={(e) => setShowAvgLines(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden />
+              <span className="switch-text">Avg lines</span>
+            </label>
+          </div>
         </div>
 
         <div className="stage">
@@ -859,6 +885,63 @@ export default function App() {
               strokeWidth={1}
               strokeDasharray="4 3"
             />
+
+            {showAvgLines &&
+              data.tickers
+                .filter(
+                  (sym) =>
+                    visible[sym] !== false &&
+                    data.holdFrom?.[sym] &&
+                    data.series[sym],
+                )
+                .map((sym, i, arr) => {
+                  const from = data.holdFrom![sym]
+                  const x1 = xScale(parseDay(from))
+                  const x2 = M.left + PLOT_W
+                  const color = data.colors[sym] ?? colorFor(sym)
+                  const avg = data.avgCostUsd?.[sym]
+                  const label = avg
+                    ? `${sym} avg $${avg.toFixed(avg >= 100 ? 0 : 2)}`
+                    : `${sym} BE`
+                  // Stagger labels above/below zero so tickers stay readable
+                  const above = i % 2 === 0
+                  const row = Math.floor(i / 2)
+                  const ly = zeroY + (above ? -10 - row * 14 : 14 + row * 14)
+                  const midX = Math.min(
+                    Math.max((x1 + x2) / 2, M.left + 40),
+                    M.left + PLOT_W - 40,
+                  )
+                  // Slight vertical offset so colored dashes don't fully stack
+                  const yOff =
+                    arr.length <= 1
+                      ? 0
+                      : (i - (arr.length - 1) / 2) * 1.6
+                  return (
+                    <g key={`avg-${sym}`}>
+                      <line
+                        x1={x1}
+                        x2={x2}
+                        y1={zeroY + yOff}
+                        y2={zeroY + yOff}
+                        stroke={color}
+                        strokeWidth={1.5}
+                        strokeDasharray="6 4"
+                        opacity={0.85}
+                      />
+                      <text
+                        x={midX}
+                        y={ly}
+                        textAnchor="middle"
+                        fontSize={10}
+                        fontWeight={650}
+                        fill={color}
+                        opacity={0.95}
+                      >
+                        {label}
+                      </text>
+                    </g>
+                  )
+                })}
 
             {paths.map(({ sym, pts }) => (
               <polyline
