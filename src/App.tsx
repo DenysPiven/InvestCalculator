@@ -168,6 +168,25 @@ function fmtEnd(v: number) {
   return `${sign}${Math.round(v)}€`
 }
 
+function fmtInvested(v: number) {
+  return `€${Math.round(v)}`
+}
+
+/** Total EUR invested per series key (from buy points). */
+function investedBySeries(data: ChartData): Record<string, number> {
+  const bySym: Record<string, number> = {}
+  for (const b of data.buys ?? []) {
+    bySym[b.sym] = (bySym[b.sym] ?? 0) + b.eur
+  }
+  const total = Object.values(bySym).reduce((s, v) => s + v, 0)
+  return {
+    ...bySym,
+    TOTAL: total,
+    // Same cash, redirected into the baseline
+    ALL_VOO: total,
+  }
+}
+
 function normalizeChart(d: ChartData): ChartData {
   const tickers =
     d.tickers?.length
@@ -607,6 +626,7 @@ export default function App() {
   const endX = M.left + PLOT_W + 8
   const nameOf = (sym: string) =>
     data.labels?.[sym] ?? DEFAULT_LABELS[sym] ?? sym
+  const invested = investedBySeries(data)
   const delta =
     data.deltaAllVoo ??
     (data.series.ALL_VOO
@@ -873,25 +893,35 @@ export default function App() {
 
             {seriesOrder
               .filter((sym) => visible[sym] !== false && data.series[sym])
-              .map((sym, i) => (
-                <g
-                  key={sym}
-                  transform={`translate(${M.left + 8}, ${M.top + 14 + i * 18})`}
-                >
-                  <line
-                    x1={0}
-                    x2={18}
-                    y1={0}
-                    y2={0}
-                    stroke={data.colors[sym]}
-                    strokeWidth={sym === 'TOTAL' || sym === 'ALL_VOO' ? 2.4 : 1.8}
-                    strokeDasharray={sym === 'ALL_VOO' ? '7 4' : undefined}
-                  />
-                  <text x={24} y={4} fontSize={12} fill="#1c1917">
-                    {nameOf(sym)}
-                  </text>
-                </g>
-              ))}
+              .map((sym, i) => {
+                const put = invested[sym]
+                const putText =
+                  put != null && put > 0 ? ` · ${fmtInvested(put)}` : ''
+                return (
+                  <g
+                    key={sym}
+                    transform={`translate(${M.left + 8}, ${M.top + 14 + i * 18})`}
+                  >
+                    <line
+                      x1={0}
+                      x2={18}
+                      y1={0}
+                      y2={0}
+                      stroke={data.colors[sym]}
+                      strokeWidth={sym === 'TOTAL' || sym === 'ALL_VOO' ? 2.4 : 1.8}
+                      strokeDasharray={sym === 'ALL_VOO' ? '7 4' : undefined}
+                    />
+                    <text x={24} y={4} fontSize={12} fill="#1c1917">
+                      {nameOf(sym)}
+                      {putText ? (
+                        <tspan fill="#78716c" fontWeight={500}>
+                          {putText}
+                        </tspan>
+                      ) : null}
+                    </text>
+                  </g>
+                )
+              })}
 
             <text
               x={18}
