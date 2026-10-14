@@ -1,0 +1,28 @@
+{
+  "name": "invest-calculator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:pages": "VITE_BASE=/InvestCalculator/ tsc -b && VITE_BASE=/InvestCalculator/ vite build",
+    "update-prices": "python3 scripts/update_prices_cache.py --incremental",
+    "update-prices:full": "python3 scripts/update_prices_cache.py --years 10",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

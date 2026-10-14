@@ -1,0 +1,40 @@
+# InvestCalculator
+
+Interactive IBKR earnings chart in the browser:
+
+- Upload an IBKR **Activity Statement** CSV
+- Keep a synthetic **Classic (demo)** chart plus your private uploads in a left sidebar (uploads stay in browser `localStorage` only; trash to delete)
+- Drag buy-point labels (saved per portfolio)
+- Toggle VOO / QQQ / SMH / TOTAL / **if all → VOO**
+- Export PNG
+
+Live (GitHub Pages): after enabling Pages,  
+`https://denyspiven.github.io/InvestCalculator/`
+
+## Local
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://127.0.0.1:43127](http://127.0.0.1:43127).
+
+## GitHub Pages
+
+1. Push to `main` or `master`.
+2. Repo **Settings → Pages → Source: GitHub Actions**.
+3. The workflow `.github/workflows/deploy-pages.yml` builds with
+   `VITE_BASE=/InvestCalculator/` and deploys `dist/`.
+
+## Data
+
+- **Price cache:** `public/prices_cache.json` holds ~10y daily closes for VOO / QQQ / SMH / EURUSD. Refresh locally with `npm run update-prices` (incremental) or `npm run update-prices:full`. CI also refreshes the cache before each Pages deploy.
+- **Upload:** client parses the IBKR Trades section, uses the bundled cache, and only fetches the missing tail (Frankfurter FX in the browser; Yahoo via Vite proxy in local dev). Earnings = value − invested (€); open day starts at €0.
+- **Classic demo:** synthetic buys in `public/chart_data.json` (regenerate with `python3 scripts/generate_demo_chart.py`). Not a real brokerage statement.
+- **Your uploads** never leave the browser; they are not committed to the repo.
+
+## Notes
+
+- End labels sit on the far right at their own Y (no arrows).
+- On GitHub Pages, label positions persist in the browser only (no server write).
