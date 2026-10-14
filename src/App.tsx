@@ -697,20 +697,9 @@ export default function App() {
           >
             {busy ? 'Loading…' : 'Upload IBKR CSV'}
           </button>
-          <div className="toolbar-export">
-            <button type="button" className="primary" onClick={exportPng}>
-              Export PNG
-            </button>
-            <label className="switch" title="Buy labels on the chart">
-              <input
-                type="checkbox"
-                checked={showLabels}
-                onChange={(e) => setShowLabels(e.target.checked)}
-              />
-              <span className="switch-track" aria-hidden />
-              <span className="switch-text">Buy labels</span>
-            </label>
-          </div>
+          <button type="button" className="primary" onClick={exportPng}>
+            Export PNG
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -742,6 +731,15 @@ export default function App() {
               {nameOf(sym)}
             </button>
           ))}
+          <label className="switch" title="Buy labels on the chart">
+            <input
+              type="checkbox"
+              checked={showLabels}
+              onChange={(e) => setShowLabels(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden />
+            <span className="switch-text">Buy labels</span>
+          </label>
         </div>
 
         <div className="stage">

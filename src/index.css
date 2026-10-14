@@ -169,7 +169,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
   margin-bottom: 12px;
 }
 
@@ -178,21 +178,8 @@ body {
   font-size: 1.35rem;
   font-weight: 650;
   margin: 0;
+  margin-right: auto;
   letter-spacing: -0.02em;
-  align-self: center;
-}
-
-.toolbar > button {
-  align-self: center;
-}
-
-.toolbar-export {
-  margin-left: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  min-width: 132px;
 }
 
 .toolbar p {
@@ -297,7 +284,12 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
   margin-bottom: 12px;
+}
+
+.toggles .switch {
+  margin-left: auto;
 }
 
 .toggle {
