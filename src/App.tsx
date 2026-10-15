@@ -839,7 +839,7 @@ export default function App() {
         <div className="toolbar">
           <h1>Invest Calculator</h1>
           <button type="button" onClick={reset}>
-            Reset positions
+            Reset layout
           </button>
           <button
             type="button"
