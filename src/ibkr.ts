@@ -212,6 +212,11 @@ type PricesCache = {
 
 let pricesCachePromise: Promise<PricesCache | null> | null = null
 
+/** Drop in-memory price cache so the next build reloads prices_cache.json. */
+export function invalidatePricesCache() {
+  pricesCachePromise = null
+}
+
 function loadPricesCache() {
   if (!pricesCachePromise) {
     pricesCachePromise = fetch(`${assetUrl('prices_cache.json')}?t=${Date.now()}`)
@@ -268,21 +273,31 @@ function parseYahooCloses(data: {
   return map
 }
 
-/** Live Yahoo via Vite dev proxy (GitHub Pages has no CORS path). */
+/** Live Yahoo: Vite proxy in dev; direct + CORS relay on Pages. */
 async function fetchLiveYahooCloses(
   symbol: string,
   startIso: string,
   endIso: string,
 ): Promise<Map<string, number> | null> {
-  if (!import.meta.env.DEV) return null
   const period1 = Math.floor(dayMs(startIso) / 1000) - 86400
   const period2 = Math.floor(dayMs(endIso) / 1000) + 86400
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`
-  try {
-    return parseYahooCloses(await fetchJson(`/api/yahoo${path}`, 12000))
-  } catch {
-    return null
+  const yahooUrl = `https://query1.finance.yahoo.com${path}`
+  const urls = import.meta.env.DEV
+    ? [`/api/yahoo${path}`, yahooUrl]
+    : [
+        yahooUrl,
+        // Relay so GitHub Pages can fill days past the bundled cache.
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
+      ]
+  for (const url of urls) {
+    try {
+      return parseYahooCloses(await fetchJson(url, 14000))
+    } catch {
+      /* try next source */
+    }
   }
+  return null
 }
 
 async function fetchYahooCloses(

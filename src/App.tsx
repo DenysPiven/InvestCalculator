@@ -13,6 +13,7 @@ import {
   CHART_COLORS,
   CHART_LABELS,
   colorFor,
+  invalidatePricesCache,
   seriesKeys,
   type ChartData,
 } from './ibkr'
@@ -27,6 +28,7 @@ import {
   saveStore,
   setActive,
   updateDraftPositions,
+  updatePortfolioChart,
   updateSavedPositions,
   upsertUpload,
   type PortfolioStore,
@@ -243,6 +245,7 @@ export default function App() {
   const buysRef = useRef<Buy[]>([])
   const storeRef = useRef(store)
   const saveGen = useRef(0)
+  const didAutoRefresh = useRef(false)
   const dragRef = useRef<{
     id: string
     startX: number
@@ -360,13 +363,15 @@ export default function App() {
     try {
       const text = await file.text()
       setStatusMsg('Building chart from prices…')
+      invalidatePricesCache()
       const chart = await buildChartFromIbkrCsv(text)
       const normalized = normalizeChart(chart)
       const positions = buysToPosMap(applyPositions(normalized.buys, null))
-      const { store: next, id, reused } = upsertUpload(storeRef.current, {
+      const { store: next, id } = upsertUpload(storeRef.current, {
         name: nameFromFile(file.name),
         chart: normalized,
         positions,
+        csvText: text,
       })
       commitStore(next)
       const item = next.items.find((i) => i.id === id)!
@@ -377,9 +382,7 @@ export default function App() {
       } else {
         showPortfolio(normalized, layoutFor(item))
       }
-      if (!reused) {
-        /* new upload — keep quiet */
-      }
+      setStatusMsg('')
     } catch (e) {
       setStatusMsg(`Upload failed: ${e instanceof Error ? e.message : e}`)
     } finally {
@@ -387,6 +390,81 @@ export default function App() {
       if (fileRef.current) fileRef.current.value = ''
     }
   }
+
+  const refreshToToday = useCallback(async () => {
+    const item = storeRef.current.items.find(
+      (i) => i.id === storeRef.current.activeId,
+    )
+    if (!item) return
+    setBusy(true)
+    setStatusMsg('Updating prices to today…')
+    try {
+      invalidatePricesCache()
+      // Keep current label layout across rebuild
+      const draft = updateDraftPositions(
+        storeRef.current,
+        item.id,
+        buysToPosMap(buysRef.current),
+      )
+      commitStore(draft)
+
+      if (item.kind === 'classic') {
+        const bust = `?t=${Date.now()}`
+        const raw = (await fetch(
+          `${assetUrl('chart_data.json')}${bust}`,
+        ).then((r) => r.json())) as ChartData
+        const classic = normalizeChart(raw)
+        setClassicChart(classic)
+        const withMeta = {
+          ...storeRef.current,
+          items: storeRef.current.items.map((i) =>
+            i.id === CLASSIC_ID
+              ? {
+                  ...i,
+                  asOf: classic.asOf,
+                  buysCount: classic.buys.length,
+                  fingerprint: fingerprintFromChart(classic),
+                }
+              : i,
+          ),
+        }
+        commitStore(withMeta)
+        const classicItem = withMeta.items.find((i) => i.id === CLASSIC_ID)
+        showPortfolio(classic, layoutFor(classicItem) || FACTORY_POS)
+        setStatusMsg('')
+        return
+      }
+
+      if (!item.csvText) {
+        setStatusMsg(
+          'Re-upload this CSV once — then Refresh can rebuild to today.',
+        )
+        return
+      }
+
+      const chart = normalizeChart(await buildChartFromIbkrCsv(item.csvText))
+      const next = updatePortfolioChart(storeRef.current, item.id, chart)
+      commitStore(next)
+      const fresh = next.items.find((i) => i.id === item.id)
+      showPortfolio(chart, layoutFor(fresh))
+      setStatusMsg('')
+    } catch (e) {
+      setStatusMsg(`Refresh failed: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [commitStore, showPortfolio])
+
+  // One-shot: if the active upload is older than today and we still have the CSV, rebuild.
+  useEffect(() => {
+    if (didAutoRefresh.current || !data || busy) return
+    const item = store.items.find((i) => i.id === store.activeId)
+    if (!item || item.kind !== 'upload' || !item.csvText) return
+    const today = new Date().toISOString().slice(0, 10)
+    if (item.asOf && item.asOf >= today) return
+    didAutoRefresh.current = true
+    void refreshToToday()
+  }, [data, store, busy, refreshToToday])
 
   const selectPortfolio = (item: StoredPortfolio) => {
     if (item.id === storeRef.current.activeId) return
@@ -753,6 +831,14 @@ export default function App() {
           >
             {busy ? 'Loading…' : 'Upload CSV'}
           </button>
+          <button
+            type="button"
+            disabled={busy}
+            title="Rebuild chart with latest prices through today"
+            onClick={() => void refreshToToday()}
+          >
+            {busy ? 'Updating…' : 'Refresh to today'}
+          </button>
           <button type="button" className="primary" onClick={exportPng}>
             Export PNG
           </button>
@@ -764,7 +850,9 @@ export default function App() {
             onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
           />
           {statusMsg.startsWith('Upload failed') ||
-          statusMsg.startsWith('Failed to load') ? (
+          statusMsg.startsWith('Failed to load') ||
+          statusMsg.startsWith('Refresh failed') ||
+          statusMsg.startsWith('Re-upload') ? (
             <p className="error-msg">{statusMsg}</p>
           ) : null}
         </div>

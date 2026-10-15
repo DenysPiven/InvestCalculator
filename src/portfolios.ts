@@ -18,6 +18,8 @@ export type StoredPortfolio = {
   draftPositions?: PosMap
   /** Full chart for uploads; classic reloads from chart_data.json */
   chart?: ChartData
+  /** Original Activity Statement CSV — needed to rebuild to today. */
+  csvText?: string
 }
 
 export type PortfolioStore = {
@@ -102,6 +104,7 @@ export function upsertUpload(
     name: string
     chart: ChartData
     positions: PosMap
+    csvText?: string
   },
 ): { store: PortfolioStore; id: string; reused: boolean } {
   const fingerprint = fingerprintFromChart(input.chart)
@@ -123,6 +126,7 @@ export function upsertUpload(
       asOf: input.chart.asOf,
       buysCount: input.chart.buys.length,
       chart: input.chart,
+      csvText: input.csvText ?? existing.csvText,
       // Keep last Save; only seed positions if somehow empty
       positions: Object.keys(existing.positions).length
         ? existing.positions
@@ -150,6 +154,7 @@ export function upsertUpload(
     positions: input.positions,
     draftPositions: input.positions,
     chart: input.chart,
+    csvText: input.csvText,
   }
   return {
     store: {
@@ -158,6 +163,28 @@ export function upsertUpload(
     },
     id,
     reused: false,
+  }
+}
+
+/** Replace chart data after a “Refresh to today” rebuild. */
+export function updatePortfolioChart(
+  store: PortfolioStore,
+  id: string,
+  chart: ChartData,
+): PortfolioStore {
+  return {
+    ...store,
+    items: store.items.map((i) =>
+      i.id === id
+        ? {
+            ...i,
+            chart,
+            asOf: chart.asOf,
+            buysCount: chart.buys.length,
+            fingerprint: fingerprintFromChart(chart),
+          }
+        : i,
+    ),
   }
 }
 

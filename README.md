@@ -6,6 +6,7 @@ Portfolio earnings chart in the browser:
 - Keep a synthetic **Classic (demo)** chart plus your private uploads in a left sidebar (uploads stay in browser `localStorage` only; trash to delete)
 - Drag buy-point labels (saved per portfolio)
 - Toggle series
+- **Refresh to today** — rebuild active portfolio with latest prices through today
 - Export PNG
 
 Live (GitHub Pages): after enabling Pages,  
