@@ -361,7 +361,11 @@ function parseYahooCloses(data: {
   return map
 }
 
-/** Live Yahoo: Vite proxy in dev; direct + CORS relay on Pages. */
+/**
+ * Live Yahoo closes for days past the bundled cache.
+ * Never hit query1 from the browser — GitHub Pages gets CORS errors in the console
+ * even when the failure is caught. Dev uses the Vite proxy; Pages uses a CORS relay.
+ */
 async function fetchLiveYahooCloses(
   symbol: string,
   startIso: string,
@@ -372,11 +376,10 @@ async function fetchLiveYahooCloses(
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`
   const yahooUrl = `https://query1.finance.yahoo.com${path}`
   const urls = import.meta.env.DEV
-    ? [`/api/yahoo${path}`, yahooUrl]
+    ? [`/api/yahoo${path}`]
     : [
-        yahooUrl,
-        // Relay so GitHub Pages can fill days past the bundled cache.
         `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
+        `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
       ]
   for (const url of urls) {
     try {

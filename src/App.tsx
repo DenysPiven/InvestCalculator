@@ -64,8 +64,12 @@ const FACTORY_POS: PosMap = {
   'SMH-2026-09-30': { lx: 1790786880000, ly: 65.56 },
 }
 
-function buysToPosMap(buys: Buy[]): PosMap {
-  return Object.fromEntries(buys.map((b) => [b.id, { lx: b.lx, ly: b.ly }]))
+function labelsToPosMap(...groups: Buy[][]): PosMap {
+  const out: PosMap = {}
+  for (const group of groups) {
+    for (const b of group) out[b.id] = { lx: b.lx, ly: b.ly }
+  }
+  return out
 }
 
 const W = 1100
@@ -232,6 +236,7 @@ export default function App() {
   const [data, setData] = useState<ChartData | null>(null)
   const [classicChart, setClassicChart] = useState<ChartData | null>(null)
   const [buys, setBuys] = useState<Buy[]>([])
+  const [divLabels, setDivLabels] = useState<Buy[]>([])
   const [active, setActiveLabel] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -243,6 +248,7 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const buysRef = useRef<Buy[]>([])
+  const divsRef = useRef<Buy[]>([])
   const storeRef = useRef(store)
   const saveGen = useRef(0)
   const didAutoRefresh = useRef(false)
@@ -262,6 +268,10 @@ export default function App() {
     buysRef.current = buys
   }, [buys])
 
+  useEffect(() => {
+    divsRef.current = divLabels
+  }, [divLabels])
+
   const commitStore = useCallback((next: PortfolioStore) => {
     storeRef.current = next
     saveStore(next)
@@ -279,12 +289,20 @@ export default function App() {
         }
         return next
       })
-      const nextBuys = applyPositions(
-        normalized.buys,
-        positions && Object.keys(positions).length ? positions : null,
+      const pos =
+        positions && Object.keys(positions).length ? positions : null
+      // Layout buys + div labels together so they don't overlap by default
+      const buyIds = new Set(normalized.buys.map((b) => b.id))
+      const laid = applyPositions(
+        [...normalized.buys, ...(normalized.divs ?? [])],
+        pos,
       )
+      const nextBuys = laid.filter((b) => buyIds.has(b.id))
+      const nextDivs = laid.filter((b) => !buyIds.has(b.id))
       buysRef.current = nextBuys
+      divsRef.current = nextDivs
       setBuys(nextBuys)
+      setDivLabels(nextDivs)
     },
     [],
   )
@@ -366,7 +384,11 @@ export default function App() {
       invalidatePricesCache()
       const chart = await buildChartFromIbkrCsv(text)
       const normalized = normalizeChart(chart)
-      const positions = buysToPosMap(applyPositions(normalized.buys, null))
+      const laid = applyPositions(
+        [...normalized.buys, ...(normalized.divs ?? [])],
+        null,
+      )
+      const positions = labelsToPosMap(laid)
       const { store: next, id } = upsertUpload(storeRef.current, {
         name: nameFromFile(file.name),
         chart: normalized,
@@ -404,7 +426,7 @@ export default function App() {
       const draft = updateDraftPositions(
         storeRef.current,
         item.id,
-        buysToPosMap(buysRef.current),
+        labelsToPosMap(buysRef.current, divsRef.current),
       )
       commitStore(draft)
 
@@ -473,7 +495,7 @@ export default function App() {
     const withDraft = updateDraftPositions(
       cur,
       cur.activeId,
-      buysToPosMap(buysRef.current),
+      labelsToPosMap(buysRef.current, divsRef.current),
     )
     const next = setActive(withDraft, item.id)
     commitStore(next)
@@ -515,6 +537,7 @@ export default function App() {
     const allY = [
       ...Object.values(data.series).flat(),
       ...buys.map((b) => b.ly),
+      ...divLabels.map((d) => d.ly),
       ...endYs,
       0,
     ]
@@ -526,7 +549,7 @@ export default function App() {
     const xScale = (t: number) => M.left + ((t - xMin) / (xMax - xMin)) * PLOT_W
     const yScale = (v: number) => M.top + ((yMax - v) / (yMax - yMin)) * PLOT_H
     return { xs, xMin, xMax, yMin, yMax, xScale, yScale, keys }
-  }, [data, buys])
+  }, [data, buys, divLabels])
 
   const clientToSvg = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current
@@ -544,7 +567,8 @@ export default function App() {
     e.preventDefault()
     e.stopPropagation()
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
-    const item = buys.find((b) => b.id === id)
+    const item =
+      buys.find((b) => b.id === id) ?? divLabels.find((d) => d.id === id)
     if (!item || !scales) return
     const p = clientToSvg(e.clientX, e.clientY)
     dragRef.current = {
@@ -565,9 +589,10 @@ export default function App() {
     const dyPx = p.y - drag.startY
     const newLx = drag.origLx + (dxPx / PLOT_W) * (scales.xMax - scales.xMin)
     const newLy = drag.origLy - (dyPx / PLOT_H) * (scales.yMax - scales.yMin)
-    setBuys((prev) =>
-      prev.map((b) => (b.id === drag.id ? { ...b, lx: newLx, ly: newLy } : b)),
-    )
+    const patch = (prev: Buy[]) =>
+      prev.map((b) => (b.id === drag.id ? { ...b, lx: newLx, ly: newLy } : b))
+    setBuys(patch)
+    setDivLabels(patch)
   }
 
   const flashSaved = useCallback(() => {
@@ -577,11 +602,10 @@ export default function App() {
   }, [])
 
   const saveLayout = useCallback(
-    async (reason: string, snapshot?: Buy[]) => {
-      const current = snapshot ?? buysRef.current
-      if (!current.length) return
+    async (reason: string) => {
+      const map = labelsToPosMap(buysRef.current, divsRef.current)
+      if (!Object.keys(map).length) return
       const gen = ++saveGen.current
-      const map = buysToPosMap(current)
       const id = storeRef.current.activeId
       const next =
         reason === 'manual'
@@ -614,12 +638,7 @@ export default function App() {
     const wasDragging = !!dragRef.current
     dragRef.current = null
     setActiveLabel(null)
-    if (wasDragging) {
-      void saveLayout(
-        'drag',
-        buysRef.current.map((b) => ({ ...b })),
-      )
-    }
+    if (wasDragging) void saveLayout('drag')
   }
 
   const reset = () => {
@@ -636,15 +655,20 @@ export default function App() {
         : null
     const restore =
       saved && Object.keys(saved).length ? saved : fallback
-    const nextBuys = applyPositions(data.buys, restore)
+    const buyIds = new Set(data.buys.map((b) => b.id))
+    const laid = applyPositions([...data.buys, ...(data.divs ?? [])], restore)
+    const nextBuys = laid.filter((b) => buyIds.has(b.id))
+    const nextDivs = laid.filter((b) => !buyIds.has(b.id))
     buysRef.current = nextBuys
+    divsRef.current = nextDivs
     setBuys(nextBuys)
+    setDivLabels(nextDivs)
     // Sync draft back to the Save snapshot (do not overwrite Save)
     commitStore(
       updateDraftPositions(
         storeRef.current,
         storeRef.current.activeId,
-        buysToPosMap(nextBuys),
+        labelsToPosMap(nextBuys, nextDivs),
       ),
     )
   }
@@ -1086,24 +1110,23 @@ export default function App() {
               )
             })}
 
-            {(data.divs ?? [])
+            {divLabels
               .filter((d) => visible[d.sym] !== false)
-              .map((d, i) => {
+              .map((d) => {
                 const color = data.colors[d.sym] ?? colorFor(d.sym)
                 const cx = xScale(parseDay(d.date))
                 const cy = yScale(d.y)
+                const lx = xScale(d.lx)
+                const ly = yScale(d.ly)
                 const s = 5
-                const label = d.label
                 const padX = 5
-                const tw = label.length * 6.2 + padX * 2
+                const tw = d.label.length * 6.2 + padX * 2
                 const th = 16
-                // Alternate above / below so nearby dividends don't stack
-                const ly = cy + (i % 2 === 0 ? -22 : 22)
-                const lx = cx + 14
+                const dist = Math.hypot(lx - cx, ly - cy)
                 return (
                   <g key={d.id}>
-                    <title>{label}</title>
-                    {showLabels && (
+                    <title>{d.label}</title>
+                    {showLabels && dist > 10 && (
                       <line
                         x1={cx}
                         y1={cy}
@@ -1121,14 +1144,18 @@ export default function App() {
                       strokeWidth={1.4}
                     />
                     {showLabels && (
-                      <g transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}>
+                      <g
+                        className="label-hit"
+                        transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}
+                        onPointerDown={(e) => onPointerDown(e, d.id)}
+                      >
                         <rect
                           width={tw}
                           height={th}
                           rx={3}
                           fill="#fff"
                           stroke={color}
-                          strokeWidth={0.9}
+                          strokeWidth={active === d.id ? 1.6 : 0.9}
                           strokeDasharray="3 2"
                           opacity={0.95}
                         />
@@ -1139,8 +1166,9 @@ export default function App() {
                           fontSize={10}
                           fontWeight={700}
                           fill={color}
+                          style={{ pointerEvents: 'none' }}
                         >
-                          {label}
+                          {d.label}
                         </text>
                       </g>
                     )}
