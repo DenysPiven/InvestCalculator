@@ -1088,20 +1088,62 @@ export default function App() {
 
             {(data.divs ?? [])
               .filter((d) => visible[d.sym] !== false)
-              .map((d) => {
+              .map((d, i) => {
                 const color = data.colors[d.sym] ?? colorFor(d.sym)
                 const cx = xScale(parseDay(d.date))
                 const cy = yScale(d.y)
                 const s = 5
+                const label = d.label
+                const padX = 5
+                const tw = label.length * 6.2 + padX * 2
+                const th = 16
+                // Alternate above / below so nearby dividends don't stack
+                const ly = cy + (i % 2 === 0 ? -22 : 22)
+                const lx = cx + 14
                 return (
                   <g key={d.id}>
-                    <title>{d.label}</title>
+                    <title>{label}</title>
+                    {showLabels && (
+                      <line
+                        x1={cx}
+                        y1={cy}
+                        x2={lx}
+                        y2={ly}
+                        stroke={color}
+                        strokeWidth={0.8}
+                        strokeDasharray="2 2"
+                      />
+                    )}
                     <polygon
                       points={`${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`}
                       fill="#fff"
                       stroke={color}
                       strokeWidth={1.4}
                     />
+                    {showLabels && (
+                      <g transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}>
+                        <rect
+                          width={tw}
+                          height={th}
+                          rx={3}
+                          fill="#fff"
+                          stroke={color}
+                          strokeWidth={0.9}
+                          strokeDasharray="3 2"
+                          opacity={0.95}
+                        />
+                        <text
+                          x={tw / 2}
+                          y={th / 2 + 3.5}
+                          textAnchor="middle"
+                          fontSize={10}
+                          fontWeight={700}
+                          fill={color}
+                        >
+                          {label}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 )
               })}
