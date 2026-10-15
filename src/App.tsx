@@ -980,8 +980,13 @@ export default function App() {
                 const put = invested[sym] ?? 0
                 const earn = data.series[sym]?.[data.series[sym].length - 1] ?? 0
                 const now = put + earn
+                const div = data.dividendsEur?.[sym] ?? 0
+                const divText =
+                  div >= 0.5 ? ` · div ${fmtEur(div)}` : div <= -0.5 ? ` · div ${fmtEur(div)}` : ''
                 const putText =
-                  put > 0 ? ` · in ${fmtEur(put)} → ${fmtEur(now)}` : ''
+                  put > 0
+                    ? ` · in ${fmtEur(put)} → ${fmtEur(now)}${divText}`
+                    : divText
                 return (
                   <g
                     key={sym}
@@ -1080,6 +1085,26 @@ export default function App() {
                 </g>
               )
             })}
+
+            {(data.divs ?? [])
+              .filter((d) => visible[d.sym] !== false)
+              .map((d) => {
+                const color = data.colors[d.sym] ?? colorFor(d.sym)
+                const cx = xScale(parseDay(d.date))
+                const cy = yScale(d.y)
+                const s = 5
+                return (
+                  <g key={d.id}>
+                    <title>{d.label}</title>
+                    <polygon
+                      points={`${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`}
+                      fill="#fff"
+                      stroke={color}
+                      strokeWidth={1.4}
+                    />
+                  </g>
+                )
+              })}
 
             {seriesOrder
               .filter((sym) => visible[sym] !== false && data.series[sym])

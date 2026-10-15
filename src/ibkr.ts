@@ -9,6 +9,17 @@ export type BuyPoint = {
   label: string
 }
 
+/** Cash dividend / withholding event (shown as markers; folded into series). */
+export type DivPoint = {
+  id: string
+  date: string
+  sym: string
+  y: number
+  /** Net EUR for this payment (gross + withholding). */
+  eur: number
+  label: string
+}
+
 export type ChartData = {
   asOf?: string
   dates: string[]
@@ -16,6 +27,10 @@ export type ChartData = {
   tickers: string[]
   series: Record<string, number[]>
   buys: BuyPoint[]
+  /** Dividend markers (optional; older saved charts may omit). */
+  divs?: DivPoint[]
+  /** Cumulative net dividends received per series key (EUR). */
+  dividendsEur?: Record<string, number>
   colors: Record<string, string>
   labels: Record<string, string>
   title: string
@@ -53,10 +68,21 @@ export const CHART_LABELS: Record<string, string> = {
 }
 
 type Trade = { date: string; sym: string; usd: number; qty: number }
+type DivCash = { date: string; sym: string; usd: number }
 
 function numCell(v: string | undefined): number {
   if (v == null || v === '') return NaN
   return Number(String(v).replace(/,/g, ''))
+}
+
+/** Pull ticker from IBKR dividend description: `VOO(US922…) Cash Dividend…`. */
+function symFromDivDescription(desc: string, symbolCol?: string): string | null {
+  const fromCol = (symbolCol ?? '').trim().toUpperCase()
+  if (fromCol && isEquitySymbol(fromCol)) return fromCol
+  const m = /^([A-Z][A-Z0-9./^-]*)\s*\(/i.exec(desc.trim())
+  if (!m) return null
+  const sym = m[1].toUpperCase()
+  return isEquitySymbol(sym) ? sym : null
 }
 
 /** Minimal CSV row splitter (handles quoted commas). */
@@ -162,6 +188,68 @@ export function parseIbkrTrades(csvText: string): Trade[] {
     )
   }
   return trades
+}
+
+/**
+ * Net cash from Dividends + Withholding Tax (+ Payment In Lieu).
+ * Amounts are in the statement currency (we keep USD rows only).
+ * Withholding is negative, so summing yields net cash received.
+ */
+export function parseIbkrDividendCash(csvText: string): DivCash[] {
+  const text = csvText.replace(/^\uFEFF/, '')
+  const SECTIONS = new Set([
+    'Dividends',
+    'Withholding Tax',
+    'Payment In Lieu Of Dividends',
+  ])
+  const out: DivCash[] = []
+  let section: string | null = null
+  let col: Record<string, number> | null = null
+
+  const cell = (row: string[], name: string) => {
+    const i = col?.[name] ?? -1
+    return i >= 0 ? row[i] : undefined
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const row = parseCsvLine(line)
+    const head = row[0]
+    if (!head) continue
+
+    if (SECTIONS.has(head) && row[1] === 'Header') {
+      section = head
+      col = {}
+      row.forEach((h, i) => {
+        if (h) col![h] = i
+      })
+      continue
+    }
+
+    if (!section || !SECTIONS.has(head) || row[1] !== 'Data' || !col) {
+      if (head && !SECTIONS.has(head) && row[1] === 'Header') {
+        section = null
+        col = null
+      }
+      continue
+    }
+
+    const ccy = (cell(row, 'Currency') ?? '').toUpperCase()
+    if (ccy !== 'USD') continue
+
+    const date = (cell(row, 'Date') ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+
+    const amount = numCell(cell(row, 'Amount'))
+    if (!Number.isFinite(amount) || amount === 0) continue
+
+    const desc = cell(row, 'Description') ?? ''
+    const sym = symFromDivDescription(desc, cell(row, 'Symbol'))
+    if (!sym) continue
+
+    out.push({ date, sym, usd: amount })
+  }
+  return out
 }
 
 export function seriesKeys(data: ChartData): string[] {
@@ -396,11 +484,22 @@ export async function buildChartFromIbkrCsv(
 ): Promise<ChartData> {
   const trades = parseIbkrTrades(csvText)
   const tickers = [...new Set(trades.map((t) => t.sym))].sort()
+  const tickerSet = new Set(tickers)
   const tradeDates = trades.map((t) => t.date).sort()
   const start = tradeDates[0]
   const lastTrade = tradeDates[tradeDates.length - 1]
   const today = new Date().toISOString().slice(0, 10)
   const end = opts?.endDate ?? (today > lastTrade ? today : lastTrade)
+
+  // Total return (modern portfolio charts): price P&L + net cash dividends.
+  const divCash = parseIbkrDividendCash(csvText).filter((d) =>
+    tickerSet.has(d.sym),
+  )
+  const divAgg = new Map<string, number>()
+  for (const d of divCash) {
+    const key = `${d.date}|${d.sym}`
+    divAgg.set(key, (divAgg.get(key) ?? 0) + d.usd)
+  }
 
   const padStart = isoFromMs(dayMs(start) - 2 * 86400000)
   const fxMap = await fetchEurUsd(padStart, end)
@@ -430,10 +529,22 @@ export async function buildChartFromIbkrCsv(
 
   const hold: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
   const inv: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
+  const divEur: Record<string, number> = Object.fromEntries(
+    tickers.map((t) => [t, 0]),
+  )
   const series: Record<string, number[]> = Object.fromEntries(
     tickers.map((t) => [t, [] as number[]]),
   )
   const buys: BuyPoint[] = []
+  const divs: DivPoint[] = []
+
+  // Dividends dated before the chart window still count toward total return.
+  for (const [key, usd] of divAgg) {
+    const [d, sym] = key.split('|')
+    if (d >= start) continue
+    const rate0 = fx[0] || 1
+    divEur[sym] += usd / rate0
+  }
 
   days.forEach((d, i) => {
     const rate = fx[i]
@@ -444,30 +555,57 @@ export async function buildChartFromIbkrCsv(
         const eur = b.usd / rate
         hold[sym] += b.qty
         inv[sym] += eur
-        const earn =
-          prevHold === 0
-            ? 0
-            : (hold[sym] * px[sym][i]) / rate - inv[sym]
+      }
+
+      const divUsd = divAgg.get(`${d}|${sym}`) ?? 0
+      if (divUsd !== 0) {
+        divEur[sym] += divUsd / rate
+      }
+
+      // Total return = price P&L + cumulative net dividends (cash).
+      let pricePnl = hold[sym]
+        ? (hold[sym] * px[sym][i]) / rate - inv[sym]
+        : 0
+      if (prevHold === 0 && hold[sym] > 0) pricePnl = 0
+      const y = Math.round((pricePnl + divEur[sym]) * 100) / 100
+      series[sym].push(y)
+
+      if (b) {
         buys.push({
           id: `${sym}-${d}`,
           date: d,
           sym,
-          y: Math.round(earn * 100) / 100,
-          eur: Math.round(eur * 100) / 100,
-          label: `${sym} €${Math.round(eur)}`,
+          y,
+          eur: Math.round((b.usd / rate) * 100) / 100,
+          label: `${sym} €${Math.round(b.usd / rate)}`,
         })
       }
-      let earn = hold[sym]
-        ? (hold[sym] * px[sym][i]) / rate - inv[sym]
-        : 0
-      if (prevHold === 0 && hold[sym] > 0) earn = 0
-      series[sym].push(Math.round(earn * 100) / 100)
+      if (divUsd !== 0) {
+        const dEur = Math.round((divUsd / rate) * 100) / 100
+        divs.push({
+          id: `div-${sym}-${d}`,
+          date: d,
+          sym,
+          y,
+          eur: dEur,
+          label: `${sym} div €${Math.round(dEur)}`,
+        })
+      }
     }
   })
 
   const total = days.map((_, i) =>
     Math.round(tickers.reduce((s, t) => s + series[t][i], 0) * 100) / 100,
   )
+
+  const dividendsEur: Record<string, number> = {}
+  let divTotal = 0
+  for (const t of tickers) {
+    const v = Math.round(divEur[t] * 100) / 100
+    dividendsEur[t] = v
+    divTotal += v
+  }
+  dividendsEur.TOTAL = Math.round(divTotal * 100) / 100
 
   const endDate = new Date(end + 'T00:00:00')
   const titleDay = `${endDate.getUTCDate()} ${endDate.toLocaleString('en-US', {
@@ -491,6 +629,9 @@ export async function buildChartFromIbkrCsv(
     labels[t] = t
   })
 
+  const divNote =
+    dividendsEur.TOTAL > 0.5 ? ' · total return (incl. div)' : ''
+
   return {
     asOf: end,
     dates: days,
@@ -500,9 +641,11 @@ export async function buildChartFromIbkrCsv(
       TOTAL: total,
     },
     buys,
+    divs,
+    dividendsEur,
     colors,
     labels,
-    title: `Earnings + buys (${tickers.join(', ')}) · ${startDay} → ${titleDay}`,
+    title: `Earnings + buys (${tickers.join(', ')}) · ${startDay} → ${titleDay}${divNote}`,
     source: 'upload',
   }
 }
