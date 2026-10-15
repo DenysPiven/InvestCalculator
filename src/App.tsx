@@ -908,7 +908,7 @@ export default function App() {
               fontWeight={650}
               fill="#1c1917"
             >
-              {data.title}
+              Earnings
             </text>
 
             {yTicks.map((v) => (

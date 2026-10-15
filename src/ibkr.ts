@@ -607,17 +607,6 @@ export async function buildChartFromIbkrCsv(
   }
   dividendsEur.TOTAL = Math.round(divTotal * 100) / 100
 
-  const endDate = new Date(end + 'T00:00:00')
-  const titleDay = `${endDate.getUTCDate()} ${endDate.toLocaleString('en-US', {
-    month: 'short',
-    timeZone: 'UTC',
-  })} ${endDate.getUTCFullYear()}`
-  const startDate = new Date(start + 'T00:00:00')
-  const startDay = `${startDate.getUTCDate()} ${startDate.toLocaleString('en-US', {
-    month: 'short',
-    timeZone: 'UTC',
-  })} ${startDate.getUTCFullYear()}`
-
   const colors: Record<string, string> = {
     TOTAL: CHART_COLORS.TOTAL,
   }
@@ -628,9 +617,6 @@ export async function buildChartFromIbkrCsv(
     colors[t] = colorFor(t, i)
     labels[t] = t
   })
-
-  const divNote =
-    dividendsEur.TOTAL > 0.5 ? ' · total return (incl. div)' : ''
 
   return {
     asOf: end,
@@ -645,7 +631,7 @@ export async function buildChartFromIbkrCsv(
     dividendsEur,
     colors,
     labels,
-    title: `Earnings + buys (${tickers.join(', ')}) · ${startDay} → ${titleDay}${divNote}`,
+    title: 'Earnings',
     source: 'upload',
   }
 }

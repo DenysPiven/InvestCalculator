@@ -141,9 +141,6 @@ def main() -> None:
         round(series["VOO"][i] + series["QQQ"][i] + series["SMH"][i], 2)
         for i in range(len(days))
     ]
-    title_day = f"{end.day} {end.strftime('%b %Y')}"
-
-    start_title = f"{start.day} {start.strftime('%b %Y')}"
     chart = {
         "asOf": end.isoformat(),
         "source": "demo",
@@ -153,9 +150,7 @@ def main() -> None:
         "buys": buy_pts,
         "colors": COLORS,
         "labels": LABELS,
-        "title": (
-            f"Demo earnings ({', '.join(TICKERS)}) · {start_title} → {title_day}"
-        ),
+        "title": "Earnings",
     }
     OUT_CHART.write_text(json.dumps(chart))
 
