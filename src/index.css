@@ -360,6 +360,8 @@ button:disabled {
 @media (max-width: 860px) {
   .app {
     grid-template-columns: 1fr;
+    padding: 12px 12px 24px;
+    gap: 12px;
   }
 
   .sidebar {
@@ -368,6 +370,127 @@ button:disabled {
 
   .portfolio-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  .toggles .switch-group {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .toolbar h1 {
+    width: 100%;
+    margin-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 10px 10px 20px;
+    gap: 10px;
+  }
+
+  .sidebar {
+    padding: 10px 8px 12px;
+    border-radius: 10px;
+  }
+
+  .sidebar-head {
+    margin-bottom: 8px;
+  }
+
+  .sidebar-head h2 {
+    font-size: 1rem;
+  }
+
+  /* Horizontal scroll of portfolio cards */
+  .portfolio-list {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+  }
+
+  .portfolio-list li {
+    flex: 0 0 min(72vw, 220px);
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  .portfolio-name {
+    font-size: 0.85rem;
+  }
+
+  .portfolio-meta {
+    font-size: 0.7rem;
+  }
+
+  .toolbar {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .toolbar h1 {
+    font-size: 1.15rem;
+  }
+
+  .toolbar button {
+    flex: 1 1 calc(50% - 8px);
+    min-height: 40px;
+    padding: 9px 10px;
+    font-size: 0.85rem;
+  }
+
+  .toolbar button.primary {
+    flex: 1 1 100%;
+  }
+
+  .toggles {
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .toggle {
+    padding: 7px 10px;
+    font-size: 0.82rem;
+  }
+
+  .switch {
+    font-size: 0.78rem;
+    gap: 6px;
+  }
+
+  .toggles .switch-group {
+    width: 100%;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 4px;
+  }
+
+  .stage {
+    border-radius: 10px;
+    /* allow horizontal pan if chart is dense */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .stage svg {
+    min-width: 640px;
+  }
+
+  .error-msg {
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .toolbar button {
+    flex: 1 1 100%;
+  }
+
+  .portfolio-list li {
+    flex-basis: 78vw;
   }
 }
