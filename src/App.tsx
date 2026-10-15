@@ -241,6 +241,7 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [incognito, setIncognito] = useState(false)
   const [saveFlash, setSaveFlash] = useState(false)
   const saveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
@@ -899,15 +900,29 @@ export default function App() {
               {nameOf(sym)}
             </button>
           ))}
-          <label className="switch" title="Buy labels on the chart">
-            <input
-              type="checkbox"
-              checked={showLabels}
-              onChange={(e) => setShowLabels(e.target.checked)}
-            />
-            <span className="switch-track" aria-hidden />
-            <span className="switch-text">Buy labels</span>
-          </label>
+          <div className="switch-group">
+            <label className="switch" title="Buy labels on the chart">
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden />
+              <span className="switch-text">Buy labels</span>
+            </label>
+            <label
+              className="switch"
+              title="Hide all amounts and axis numbers — curves only"
+            >
+              <input
+                type="checkbox"
+                checked={incognito}
+                onChange={(e) => setIncognito(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden />
+              <span className="switch-text">Incognito</span>
+            </label>
+          </div>
         </div>
 
         <div className="stage">
@@ -945,15 +960,17 @@ export default function App() {
                   stroke="#cfc8bb"
                   strokeWidth={0.8}
                 />
-                <text
-                  x={M.left - 8}
-                  y={yScale(v) + 4}
-                  textAnchor="end"
-                  fontSize={11}
-                  fill="#57534e"
-                >
-                  {v}
-                </text>
+                {!incognito && (
+                  <text
+                    x={M.left - 8}
+                    y={yScale(v) + 4}
+                    textAnchor="end"
+                    fontSize={11}
+                    fill="#57534e"
+                  >
+                    {v}
+                  </text>
+                )}
               </g>
             ))}
             {months.map((m) => (
@@ -966,15 +983,17 @@ export default function App() {
                   stroke="#cfc8bb"
                   strokeWidth={0.6}
                 />
-                <text
-                  x={xScale(m.t)}
-                  y={H - 16}
-                  textAnchor="middle"
-                  fontSize={11}
-                  fill="#57534e"
-                >
-                  {m.label}
-                </text>
+                {!incognito && (
+                  <text
+                    x={xScale(m.t)}
+                    y={H - 16}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fill="#57534e"
+                  >
+                    {m.label}
+                  </text>
+                )}
               </g>
             ))}
 
@@ -1007,8 +1026,9 @@ export default function App() {
                 const div = data.dividendsEur?.[sym] ?? 0
                 const divText =
                   div >= 0.5 ? ` · div ${fmtEur(div)}` : div <= -0.5 ? ` · div ${fmtEur(div)}` : ''
-                const putText =
-                  put > 0
+                const putText = incognito
+                  ? ''
+                  : put > 0
                     ? ` · in ${fmtEur(put)} → ${fmtEur(now)}${divText}`
                     : divText
                 return (
@@ -1036,16 +1056,18 @@ export default function App() {
                 )
               })}
 
-            <text
-              x={18}
-              y={M.top + PLOT_H / 2}
-              transform={`rotate(-90 18 ${M.top + PLOT_H / 2})`}
-              textAnchor="middle"
-              fontSize={12}
-              fill="#57534e"
-            >
-              €
-            </text>
+            {!incognito && (
+              <text
+                x={18}
+                y={M.top + PLOT_H / 2}
+                transform={`rotate(-90 18 ${M.top + PLOT_H / 2})`}
+                textAnchor="middle"
+                fontSize={12}
+                fill="#57534e"
+              >
+                €
+              </text>
+            )}
 
             {buys.filter((b) => visible[b.sym] !== false).map((b) => {
               const sym = b.sym
@@ -1058,9 +1080,10 @@ export default function App() {
               const tw = b.label.length * 6.4 + padX * 2
               const th = 18
               const dist = Math.hypot(lx - px, ly - py)
+              const labelsOn = showLabels && !incognito
               return (
                 <g key={b.id}>
-                  {showLabels && dist > 10 && (
+                  {labelsOn && dist > 10 && (
                     <line
                       x1={px}
                       y1={py}
@@ -1078,7 +1101,7 @@ export default function App() {
                     stroke="#fff"
                     strokeWidth={1}
                   />
-                  {showLabels && (
+                  {labelsOn && (
                     <g
                       className="label-hit"
                       transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}
@@ -1123,10 +1146,11 @@ export default function App() {
                 const tw = d.label.length * 6.2 + padX * 2
                 const th = 16
                 const dist = Math.hypot(lx - cx, ly - cy)
+                const labelsOn = showLabels && !incognito
                 return (
                   <g key={d.id}>
-                    <title>{d.label}</title>
-                    {showLabels && dist > 10 && (
+                    {!incognito && <title>{d.label}</title>}
+                    {labelsOn && dist > 10 && (
                       <line
                         x1={cx}
                         y1={cy}
@@ -1143,7 +1167,7 @@ export default function App() {
                       stroke={color}
                       strokeWidth={1.4}
                     />
-                    {showLabels && (
+                    {labelsOn && (
                       <g
                         className="label-hit"
                         transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}
@@ -1182,9 +1206,11 @@ export default function App() {
                 const val = data.series[sym][data.series[sym].length - 1]
                 const color = data.colors[sym] ?? colorFor(sym)
                 const pct = fmtPct(val, invested[sym] ?? 0)
-                const text = pct
-                  ? `${nameOf(sym)} ${fmtEnd(val)} (${pct})`
-                  : `${nameOf(sym)} ${fmtEnd(val)}`
+                const text = incognito
+                  ? nameOf(sym)
+                  : pct
+                    ? `${nameOf(sym)} ${fmtEnd(val)} (${pct})`
+                    : `${nameOf(sym)} ${fmtEnd(val)}`
                 return (
                   <text
                     key={`end-${sym}`}

@@ -294,8 +294,12 @@ button:disabled {
   margin-bottom: 12px;
 }
 
-.toggles .switch {
+.toggles .switch-group {
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
 }
 
 .toggle {
