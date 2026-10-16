@@ -31,6 +31,12 @@ export type ChartData = {
   divs?: DivPoint[]
   /** Cumulative net dividends received per series key (EUR). */
   dividendsEur?: Record<string, number>
+  /**
+   * Net account funding in EUR (deposits − withdrawals) from the statement.
+   * When set, TOTAL “in” uses this — the real money you put in, including
+   * broker FX conversion vs mid-market — not just Σ(trade Basis ÷ EURUSD).
+   */
+  fundingEur?: number
   colors: Record<string, string>
   labels: Record<string, string>
   title: string
@@ -225,6 +231,122 @@ export function parseIbkrTrades(csvText: string): Trade[] {
  * Amounts are in the statement currency (we keep USD rows only).
  * Withholding is negative, so summing yields net cash received.
  */
+/**
+ * Net EUR deposits − withdrawals from “Deposits & Withdrawals”.
+ * Returns null when the section is missing (keep trade-basis invested).
+ */
+export function parseIbkrNetDepositsEur(csvText: string): number | null {
+  const text = csvText.replace(/^\uFEFF/, '')
+  let col: Record<string, number> | null = null
+  let sum = 0
+  let n = 0
+
+  const cell = (row: string[], name: string) => {
+    const i = col?.[name] ?? -1
+    return i >= 0 ? row[i] : undefined
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const row = parseCsvLine(line)
+    const section = row[0] ?? ''
+    if (!/^Deposits\s*(&|and)\s*Withdrawals$/i.test(section)) continue
+
+    if (row[1] === 'Header') {
+      col = {}
+      row.forEach((h, i) => {
+        if (h) col![h] = i
+      })
+      continue
+    }
+    if (row[1] !== 'Data' || !col) continue
+
+    const ccy = (cell(row, 'Currency') ?? '').trim().toUpperCase()
+    const desc = (cell(row, 'Description') ?? '').trim().toLowerCase()
+    if (ccy === 'TOTAL' || desc === 'total' || desc.startsWith('total ')) continue
+    // Base-currency account: funding rows are EUR (or labeled Base Currency Summary).
+    if (
+      ccy &&
+      ccy !== 'EUR' &&
+      ccy !== 'BASE CURRENCY SUMMARY'
+    ) {
+      continue
+    }
+
+    const amount = numCell(cell(row, 'Amount'))
+    if (!Number.isFinite(amount) || amount === 0) continue
+    sum += amount
+    n++
+  }
+  if (!n) return null
+  return Math.round(sum * 100) / 100
+}
+
+/**
+ * Ending EUR cash from Cash Report (statement date). Used so TOTAL “in”
+ * can be full deposits while stock cost basis absorbs deposit − cash.
+ */
+export function parseIbkrEndingCashEur(csvText: string): number | null {
+  const text = csvText.replace(/^\uFEFF/, '')
+  let col: Record<string, number> | null = null
+  let found: number | null = null
+
+  const cell = (row: string[], name: string) => {
+    const i = col?.[name] ?? -1
+    return i >= 0 ? row[i] : undefined
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const row = parseCsvLine(line)
+    if ((row[0] ?? '') !== 'Cash Report') continue
+
+    if (row[1] === 'Header') {
+      col = {}
+      row.forEach((h, i) => {
+        if (h) col![h] = i
+      })
+      continue
+    }
+    if (row[1] !== 'Data') continue
+
+    const summary = (
+      cell(row, 'Currency Summary') ??
+      cell(row, 'Field Name') ??
+      row[2] ??
+      ''
+    ).trim()
+    const ccy = (cell(row, 'Currency') ?? row[3] ?? '').trim().toUpperCase()
+    const isEnding =
+      /^Ending Cash$/i.test(summary) ||
+      row.some((c) => /^Ending Cash$/i.test(c))
+    if (!isEnding) continue
+
+    const isEurBase =
+      ccy === 'EUR' ||
+      /^Base Currency Summary$/i.test(ccy) ||
+      /^Base Currency Summary$/i.test(summary) ||
+      row.some(
+        (c) => c === 'EUR' || /^Base Currency Summary$/i.test(c),
+      )
+    if (!isEurBase) continue
+
+    let amount = numCell(cell(row, 'Total'))
+    if (!Number.isFinite(amount)) {
+      for (const c of row.slice(2)) {
+        const v = numCell(c)
+        if (Number.isFinite(v)) {
+          amount = v
+          break
+        }
+      }
+    }
+    if (!Number.isFinite(amount)) continue
+    found = Math.round(amount * 100) / 100
+  }
+  return found
+}
+
 export function parseIbkrDividendCash(csvText: string): DivCash[] {
   const text = csvText.replace(/^\uFEFF/, '')
   const SECTIONS = new Set([
@@ -338,7 +460,9 @@ async function fetchJson<T>(url: string, ms = 8000): Promise<T> {
 }
 
 export function assetUrl(path: string) {
-  const base = import.meta.env.BASE_URL || '/'
+  // Bracket access avoids tsx/esbuild rewriting import.meta.env.BASE_URL in Node.
+  const meta = import.meta as unknown as { env?: Record<string, string> }
+  const base = meta.env?.['BASE_URL'] || '/'
   const p = path.startsWith('/') ? path.slice(1) : path
   return `${base}${p}`
 }
@@ -448,7 +572,8 @@ async function fetchLiveYahooCloses(
   const period2 = Math.floor(dayMs(endIso) / 1000) + 2 * 86400
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`
   const yahooUrl = `https://query1.finance.yahoo.com${path}`
-  const urls = import.meta.env.DEV
+  const meta = import.meta as unknown as { env?: Record<string, unknown> }
+  const urls = meta.env?.['DEV']
     ? [`/api/yahoo${path}`]
     : [`https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`]
   for (const url of urls) {
@@ -598,6 +723,30 @@ export async function buildChartFromIbkrCsv(
     buysAgg.set(key, cur)
   }
 
+  // Mid-market EUR cost of buys (Basis already includes IBKR commission).
+  let autoInvEur = 0
+  for (const [key, b] of buysAgg) {
+    const date = key.split('|')[0]
+    const di = days.indexOf(date)
+    const rate = (di >= 0 ? fx[di] : fx[0]) || 1
+    autoInvEur += b.usd / rate
+  }
+
+  // Real money in: statement deposits. Scale trade EUR so Σ(in) matches
+  // capital deployed (deposits − leftover cash) — captures FX conversion
+  // vs Yahoo/Frankfurter mid rates that otherwise under/over-state “in”.
+  const fundingEur = parseIbkrNetDepositsEur(csvText)
+  const endingCashEur = parseIbkrEndingCashEur(csvText) ?? 0
+  let fundingScale = 1
+  if (
+    fundingEur != null &&
+    fundingEur > 0 &&
+    autoInvEur > 0
+  ) {
+    const deployed = Math.max(fundingEur - Math.max(endingCashEur, 0), 0)
+    if (deployed > 0) fundingScale = deployed / autoInvEur
+  }
+
   const hold: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
   const inv: Record<string, number> = Object.fromEntries(tickers.map((t) => [t, 0]))
   const divEur: Record<string, number> = Object.fromEntries(
@@ -623,7 +772,7 @@ export async function buildChartFromIbkrCsv(
       const prevHold = hold[sym]
       const b = buysAgg.get(`${d}|${sym}`)
       if (b) {
-        const eur = b.usd / rate
+        const eur = (b.usd / rate) * fundingScale
         hold[sym] += b.qty
         inv[sym] += eur
       }
@@ -642,13 +791,14 @@ export async function buildChartFromIbkrCsv(
       series[sym].push(y)
 
       if (b) {
+        const eur = Math.round((b.usd / rate) * fundingScale * 100) / 100
         buys.push({
           id: `${sym}-${d}`,
           date: d,
           sym,
           y,
-          eur: Math.round((b.usd / rate) * 100) / 100,
-          label: `${sym} €${Math.round(b.usd / rate)}`,
+          eur,
+          label: `${sym} €${Math.round(eur)}`,
         })
       }
       if (divUsd !== 0) {
@@ -700,6 +850,8 @@ export async function buildChartFromIbkrCsv(
     buys,
     divs,
     dividendsEur,
+    fundingEur:
+      fundingEur != null && fundingEur > 0 ? fundingEur : undefined,
     colors,
     labels,
     title: 'Earnings',
