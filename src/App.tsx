@@ -222,13 +222,18 @@ function fmtEur(v: number) {
   return `€${Math.round(v)}`
 }
 
-/** Total EUR invested per series key (from buy points). */
+/** Total EUR invested per series key (from buy points / statement funding). */
 function investedBySeries(data: ChartData): Record<string, number> {
   const bySym: Record<string, number> = {}
   for (const b of data.buys ?? []) {
     bySym[b.sym] = (bySym[b.sym] ?? 0) + b.eur
   }
-  const total = Object.values(bySym).reduce((s, v) => s + v, 0)
+  const fromBuys = Object.values(bySym).reduce((s, v) => s + v, 0)
+  // Prefer net deposits from the Activity Statement when present.
+  const total =
+    data.fundingEur != null && data.fundingEur > 0
+      ? data.fundingEur
+      : fromBuys
   return {
     ...bySym,
     TOTAL: total,
