@@ -234,6 +234,25 @@ function investedBySeries(data: ChartData): Record<string, number> {
     data.fundingEur != null && data.fundingEur > 0
       ? data.fundingEur
       : fromBuys
+
+  // Keep per-ticker “in” summing exactly to TOTAL (funding), including
+  // older saved charts that still have mid-market buy euros.
+  if (total > 0 && fromBuys > 0 && Math.abs(total - fromBuys) > 0.005) {
+    const scale = total / fromBuys
+    const keys = Object.keys(bySym)
+    let sum = 0
+    for (const k of keys) {
+      const v = Math.round(bySym[k]! * scale * 100) / 100
+      bySym[k] = v
+      sum += v
+    }
+    if (keys.length) {
+      const last = keys[keys.length - 1]!
+      bySym[last] =
+        Math.round((bySym[last]! + (total - sum)) * 100) / 100
+    }
+  }
+
   return {
     ...bySym,
     TOTAL: total,
@@ -542,13 +561,19 @@ export default function App() {
     }
   }, [commitStore, showPortfolio])
 
-  // One-shot: if asOf is before local today and we still have the CSV, rebuild.
+  // One-shot: rebuild when asOf is before local today, or when an older
+  // saved chart is missing deposit-based fundingEur (so TOTAL “in” jumps
+  // from mid-market trade basis to real deposits, e.g. €21500).
   useEffect(() => {
     if (didAutoRefresh.current || !data || busy) return
     const item = store.items.find((i) => i.id === store.activeId)
     if (!item || item.kind !== 'upload' || !item.csvText) return
     const today = calendarTodayIso()
-    if (item.asOf && item.asOf >= today) return
+    const needsToday = !item.asOf || item.asOf < today
+    const needsFunding =
+      item.chart != null &&
+      !(item.chart.fundingEur != null && item.chart.fundingEur > 0)
+    if (!needsToday && !needsFunding) return
     didAutoRefresh.current = true
     void refreshToToday()
   }, [data, store, busy, refreshToToday])
