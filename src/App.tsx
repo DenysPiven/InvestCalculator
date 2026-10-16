@@ -11,12 +11,13 @@ import {
   assetUrl,
   buildChartFromIbkrCsv,
   calendarTodayIso,
-  CHART_COLORS,
+  CHART_COLORS_BY_THEME,
   CHART_LABELS,
   colorFor,
   invalidatePricesCache,
   seriesKeys,
   type ChartData,
+  type UiTheme,
 } from './ibkr'
 import {
   CLASSIC_ID,
@@ -49,17 +50,39 @@ type Buy = {
 }
 
 const DEFAULT_LABELS = CHART_LABELS
+const THEME_KEY = 'ic-theme'
 
-/** Chart / export palette — matches dark CSS tokens in index.css */
-const CHART_UI = {
-  bg: '#181511',
-  fg: '#f5f0e8',
-  muted: '#a8a29e',
-  grid: '#3f3a34',
-  zero: '#78716c',
-  chip: '#231f1b',
-  markerStroke: '#181511',
+/** Chart / export palettes — keep in sync with index.css theme tokens */
+const CHART_UI_BY_THEME = {
+  dark: {
+    bg: '#0e141c',
+    fg: '#e9eef5',
+    muted: '#93a1b3',
+    grid: '#243142',
+    zero: '#5c6b7e',
+    chip: '#18212c',
+    markerStroke: '#0e141c',
+  },
+  light: {
+    bg: '#f7f3ea',
+    fg: '#1c1917',
+    muted: '#57534e',
+    grid: '#cfc8bb',
+    zero: '#888888',
+    chip: '#ffffff',
+    markerStroke: '#ffffff',
+  },
 } as const
+
+function readStoredTheme(): UiTheme {
+  try {
+    const t = localStorage.getItem(THEME_KEY)
+    if (t === 'light' || t === 'dark') return t
+  } catch {
+    /* ignore */
+  }
+  return 'dark'
+}
 
 /** Factory layout for the synthetic Classic demo (not a real portfolio). */
 const FACTORY_POS: PosMap = {
@@ -242,10 +265,7 @@ function normalizeChart(d: ChartData): ChartData {
     d.tickers?.length
       ? d.tickers
       : Object.keys(d.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
-  const colors: Record<string, string> = {
-    ...d.colors,
-    ...CHART_COLORS,
-  }
+  const colors: Record<string, string> = { ...d.colors }
   const labels: Record<string, string> = {
     ...d.labels,
     ...CHART_LABELS,
@@ -254,10 +274,10 @@ function normalizeChart(d: ChartData): ChartData {
   delete colors.ALL_VOO
   delete labels.ALL_VOO
   tickers.forEach((t, i) => {
-    colors[t] = CHART_COLORS[t] ?? colors[t] ?? colorFor(t, i)
+    colors[t] = colors[t] ?? colorFor(t, i, 'dark')
     labels[t] = labels[t] ?? t
   })
-  colors.TOTAL = CHART_COLORS.TOTAL
+  colors.TOTAL = colors.TOTAL ?? colorFor('TOTAL', 0, 'dark')
   const series = { ...d.series }
   delete series.ALL_VOO
   return {
@@ -279,6 +299,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
   const [incognito, setIncognito] = useState(false)
+  const [theme, setTheme] = useState<UiTheme>(() => readStoredTheme())
   const [saveFlash, setSaveFlash] = useState(false)
   const saveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [store, setStore] = useState<PortfolioStore>(() => loadStore())
@@ -319,6 +340,32 @@ export default function App() {
   } | null>(null)
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null)
   const [panning, setPanning] = useState(false)
+  const chartUi = CHART_UI_BY_THEME[theme]
+  const themeColors = CHART_COLORS_BY_THEME[theme]
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try {
+      localStorage.setItem(THEME_KEY, theme)
+    } catch {
+      /* ignore */
+    }
+    const themeColor = document.querySelector('meta[name="theme-color"]')
+    if (themeColor) {
+      themeColor.setAttribute(
+        'content',
+        theme === 'dark' ? '#0b0e12' : '#e8e2d6',
+      )
+    }
+    const scheme = document.querySelector('meta[name="color-scheme"]')
+    if (scheme) scheme.setAttribute('content', theme)
+  }, [theme])
+
+  const seriesColor = useCallback(
+    (sym: string, index = 0) =>
+      themeColors[sym] ?? colorFor(sym, index, theme),
+    [theme, themeColors],
+  )
 
   useEffect(() => {
     storeRef.current = store
@@ -939,7 +986,7 @@ export default function App() {
     clone.setAttribute('viewBox', `0 0 ${W} ${H}`)
     clone.setAttribute(
       'style',
-      `font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; background:${CHART_UI.bg};`,
+      `font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; background:${chartUi.bg};`,
     )
 
     const xml = new XMLSerializer().serializeToString(clone)
@@ -959,7 +1006,7 @@ export default function App() {
     const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
-    ctx.fillStyle = CHART_UI.bg
+    ctx.fillStyle = chartUi.bg
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
@@ -1144,7 +1191,7 @@ export default function App() {
               className={`toggle${visible[sym] !== false ? ' on' : ''}`}
               style={
                 {
-                  '--c': data.colors[sym] ?? colorFor(sym),
+                  '--c': seriesColor(sym),
                 } as CSSProperties
               }
               onClick={() => toggleSeries(sym)}
@@ -1175,6 +1222,19 @@ export default function App() {
               />
               <span className="switch-track" aria-hidden />
               <span className="switch-text">Incognito</span>
+            </label>
+            <label className="switch" title="Switch light / dark theme">
+              <input
+                type="checkbox"
+                checked={theme === 'dark'}
+                onChange={(e) =>
+                  setTheme(e.target.checked ? 'dark' : 'light')
+                }
+              />
+              <span className="switch-track" aria-hidden />
+              <span className="switch-text">
+                {theme === 'dark' ? 'Dark' : 'Light'}
+              </span>
             </label>
           </div>
         </div>
@@ -1241,14 +1301,14 @@ export default function App() {
             onPointerUp={onPointerUp}
             onPointerLeave={onPointerUp}
           >
-            <rect x={0} y={0} width={W} height={H} fill={CHART_UI.bg} />
+            <rect x={0} y={0} width={W} height={H} fill={chartUi.bg} />
             <text
               x={W / 2}
               y={26}
               textAnchor="middle"
               fontSize={15}
               fontWeight={650}
-              fill={CHART_UI.fg}
+              fill={chartUi.fg}
             >
               Earnings
             </text>
@@ -1260,7 +1320,7 @@ export default function App() {
                   x2={M.left + PLOT_W}
                   y1={yScale(v)}
                   y2={yScale(v)}
-                  stroke={CHART_UI.grid}
+                  stroke={chartUi.grid}
                   strokeWidth={0.8}
                 />
                 {!incognito && (
@@ -1269,7 +1329,7 @@ export default function App() {
                     y={yScale(v) + 4}
                     textAnchor="end"
                     fontSize={11}
-                    fill={CHART_UI.muted}
+                    fill={chartUi.muted}
                   >
                     {v}
                   </text>
@@ -1283,7 +1343,7 @@ export default function App() {
                   x2={xScale(m.t)}
                   y1={M.top}
                   y2={M.top + PLOT_H}
-                  stroke={CHART_UI.grid}
+                  stroke={chartUi.grid}
                   strokeWidth={0.6}
                 />
                 {!incognito && (
@@ -1292,7 +1352,7 @@ export default function App() {
                     y={H - 16}
                     textAnchor="middle"
                     fontSize={11}
-                    fill={CHART_UI.muted}
+                    fill={chartUi.muted}
                   >
                     {m.label}
                   </text>
@@ -1305,7 +1365,7 @@ export default function App() {
               x2={M.left + PLOT_W}
               y1={zeroY}
               y2={zeroY}
-              stroke={CHART_UI.zero}
+              stroke={chartUi.zero}
               strokeWidth={1}
               strokeDasharray="4 3"
             />
@@ -1315,7 +1375,7 @@ export default function App() {
                 key={sym}
                 fill="none"
                 points={pts}
-                stroke={data.colors[sym]}
+                stroke={seriesColor(sym)}
                 strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
               />
             ))}
@@ -1344,13 +1404,13 @@ export default function App() {
                       x2={18}
                       y1={0}
                       y2={0}
-                      stroke={data.colors[sym]}
+                      stroke={seriesColor(sym)}
                       strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
                     />
-                    <text x={24} y={4} fontSize={12} fill={CHART_UI.fg}>
+                    <text x={24} y={4} fontSize={12} fill={chartUi.fg}>
                       {nameOf(sym)}
                       {putText ? (
-                        <tspan fill={CHART_UI.muted} fontWeight={500}>
+                        <tspan fill={chartUi.muted} fontWeight={500}>
                           {putText}
                         </tspan>
                       ) : null}
@@ -1366,7 +1426,7 @@ export default function App() {
                 transform={`rotate(-90 18 ${M.top + PLOT_H / 2})`}
                 textAnchor="middle"
                 fontSize={12}
-                fill={CHART_UI.muted}
+                fill={chartUi.muted}
               >
                 €
               </text>
@@ -1378,7 +1438,7 @@ export default function App() {
               const py = yScale(b.y)
               const lx = xScale(b.lx)
               const ly = yScale(b.ly)
-              const color = data.colors[sym] ?? colorFor(sym)
+              const color = seriesColor(sym)
               const padX = 6
               const tw = b.label.length * 6.4 + padX * 2
               const th = 18
@@ -1401,7 +1461,7 @@ export default function App() {
                     cy={py}
                     r={4.5}
                     fill={color}
-                    stroke={CHART_UI.markerStroke}
+                    stroke={chartUi.markerStroke}
                     strokeWidth={1}
                   />
                   {labelsOn && (
@@ -1422,7 +1482,7 @@ export default function App() {
                         width={tw}
                         height={th}
                         rx={4}
-                        fill={CHART_UI.chip}
+                        fill={chartUi.chip}
                         stroke={color}
                         strokeWidth={active === b.id ? 1.6 : 0.9}
                         opacity={0.96}
@@ -1447,7 +1507,7 @@ export default function App() {
             {divLabels
               .filter((d) => visible[d.sym] !== false)
               .map((d) => {
-                const color = data.colors[d.sym] ?? colorFor(d.sym)
+                const color = seriesColor(d.sym)
                 const cx = xScale(parseDay(d.date))
                 const cy = yScale(d.y)
                 const lx = xScale(d.lx)
@@ -1474,7 +1534,7 @@ export default function App() {
                     )}
                     <polygon
                       points={`${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`}
-                      fill={CHART_UI.chip}
+                      fill={chartUi.chip}
                       stroke={color}
                       strokeWidth={1.4}
                     />
@@ -1495,7 +1555,7 @@ export default function App() {
                           width={tw}
                           height={th}
                           rx={3}
-                          fill={CHART_UI.chip}
+                          fill={chartUi.chip}
                           stroke={color}
                           strokeWidth={active === d.id ? 1.6 : 0.9}
                           strokeDasharray="3 2"
@@ -1522,7 +1582,7 @@ export default function App() {
               .filter((sym) => visible[sym] !== false && data.series[sym])
               .map((sym) => {
                 const val = data.series[sym][data.series[sym].length - 1]
-                const color = data.colors[sym] ?? colorFor(sym)
+                const color = seriesColor(sym)
                 const pct = fmtPct(val, invested[sym] ?? 0)
                 const text = incognito
                   ? nameOf(sym)
