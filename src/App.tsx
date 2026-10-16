@@ -90,6 +90,31 @@ const M = { top: 48, right: 130, bottom: 48, left: 56 }
 const PLOT_W = W - M.left - M.right
 const PLOT_H = H - M.top - M.bottom
 const EXPORT_SCALE = 3
+const VIEW_MIN = 0.4
+const VIEW_MAX = 4
+
+type ViewTransform = { scale: number; x: number; y: number }
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n))
+}
+
+function clampView(
+  v: ViewTransform,
+  vpW: number,
+  vpH: number,
+): ViewTransform {
+  const scale = clamp(v.scale, VIEW_MIN, VIEW_MAX)
+  const contentW = W * scale
+  const contentH = H * scale
+  let x = v.x
+  let y = v.y
+  if (contentW <= vpW) x = (vpW - contentW) / 2
+  else x = clamp(x, vpW - contentW, 0)
+  if (contentH <= vpH) y = (vpH - contentH) / 2
+  else y = clamp(y, vpH - contentH, 0)
+  return { scale, x, y }
+}
 
 function parseDay(s: string) {
   return new Date(s + 'T00:00:00').getTime()
@@ -260,6 +285,7 @@ export default function App() {
   const [visible, setVisible] = useState<Record<string, boolean>>({})
   const fileRef = useRef<HTMLInputElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
   const buysRef = useRef<Buy[]>([])
   const divsRef = useRef<Buy[]>([])
   const storeRef = useRef(store)
@@ -272,10 +298,35 @@ export default function App() {
     origLx: number
     origLy: number
   } | null>(null)
+  const [view, setView] = useState<ViewTransform>({ scale: 1, x: 0, y: 0 })
+  const viewRef = useRef(view)
+  const pointersRef = useRef(
+    new Map<number, { x: number; y: number }>(),
+  )
+  const panRef = useRef<{
+    x: number
+    y: number
+    vx: number
+    vy: number
+  } | null>(null)
+  const pinchRef = useRef<{
+    dist: number
+    scale: number
+    x: number
+    y: number
+    midX: number
+    midY: number
+  } | null>(null)
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null)
+  const [panning, setPanning] = useState(false)
 
   useEffect(() => {
     storeRef.current = store
   }, [store])
+
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
 
   useEffect(() => {
     buysRef.current = buys
@@ -576,9 +627,71 @@ export default function App() {
     return { x: p.x, y: p.y }
   }, [])
 
+  const applyView = useCallback((next: ViewTransform) => {
+    const vp = viewportRef.current
+    if (!vp) {
+      viewRef.current = next
+      setView(next)
+      return
+    }
+    const clamped = clampView(next, vp.clientWidth, vp.clientHeight)
+    viewRef.current = clamped
+    setView(clamped)
+  }, [])
+
+  const zoomAt = useCallback(
+    (clientX: number, clientY: number, nextScale: number) => {
+      const vp = viewportRef.current
+      if (!vp) return
+      const rect = vp.getBoundingClientRect()
+      const cur = viewRef.current
+      const scale = clamp(nextScale, VIEW_MIN, VIEW_MAX)
+      const localX = clientX - rect.left
+      const localY = clientY - rect.top
+      const contentX = (localX - cur.x) / cur.scale
+      const contentY = (localY - cur.y) / cur.scale
+      applyView({
+        scale,
+        x: localX - contentX * scale,
+        y: localY - contentY * scale,
+      })
+    },
+    [applyView],
+  )
+
+  const fitView = useCallback(() => {
+    const vp = viewportRef.current
+    if (!vp) return
+    const s = Math.min(vp.clientWidth / W, vp.clientHeight / H)
+    applyView({ scale: clamp(s, VIEW_MIN, VIEW_MAX), x: 0, y: 0 })
+  }, [applyView])
+
+  const zoomBy = useCallback(
+    (factor: number) => {
+      const vp = viewportRef.current
+      if (!vp) return
+      const rect = vp.getBoundingClientRect()
+      zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, viewRef.current.scale * factor)
+    },
+    [zoomAt],
+  )
+
+  // Keep pan bounds correct when the phone rotates / chrome shows.
+  useEffect(() => {
+    const vp = viewportRef.current
+    if (!vp || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      applyView(viewRef.current)
+    })
+    ro.observe(vp)
+    return () => ro.disconnect()
+  }, [applyView])
+
   const onPointerDown = (e: ReactPointerEvent, id: string) => {
     e.preventDefault()
     e.stopPropagation()
+    panRef.current = null
+    pinchRef.current = null
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
     const item =
       buys.find((b) => b.id === id) ?? divLabels.find((d) => d.id === id)
@@ -607,6 +720,135 @@ export default function App() {
     setBuys(patch)
     setDivLabels(patch)
   }
+
+  const onViewportPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current) return
+    if ((e.target as Element).closest?.('.label-hit')) return
+    // Don't steal clicks from zoom buttons / chrome.
+    if ((e.target as Element).closest?.('.stage-bar')) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (pointersRef.current.size >= 2) {
+      const pts = [...pointersRef.current.values()]
+      const a = pts[0]
+      const b = pts[1]
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      const cur = viewRef.current
+      pinchRef.current = {
+        dist,
+        scale: cur.scale,
+        x: cur.x,
+        y: cur.y,
+        midX: (a.x + b.x) / 2,
+        midY: (a.y + b.y) / 2,
+      }
+      panRef.current = null
+      setPanning(true)
+      return
+    }
+
+    // Double-tap to toggle fit ↔ 1.6× at tap point (phone-friendly).
+    const now = Date.now()
+    const prev = lastTapRef.current
+    if (
+      prev &&
+      now - prev.t < 320 &&
+      Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 36
+    ) {
+      lastTapRef.current = null
+      const cur = viewRef.current.scale
+      const vp = viewportRef.current
+      const fitScale = vp
+        ? Math.min(vp.clientWidth / W, vp.clientHeight / H)
+        : 1
+      if (cur > fitScale * 1.15) fitView()
+      else zoomAt(e.clientX, e.clientY, Math.min(VIEW_MAX, 1.75))
+      return
+    }
+    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY }
+
+    const cur = viewRef.current
+    panRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      vx: cur.x,
+      vy: cur.y,
+    }
+    setPanning(true)
+  }
+
+  const onViewportPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current) return
+    if (!pointersRef.current.has(e.pointerId)) return
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (pointersRef.current.size >= 2 && pinchRef.current) {
+      const pts = [...pointersRef.current.values()]
+      const a = pts[0]
+      const b = pts[1]
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      const midX = (a.x + b.x) / 2
+      const midY = (a.y + b.y) / 2
+      const start = pinchRef.current
+      const nextScale = clamp(
+        start.scale * (dist / start.dist),
+        VIEW_MIN,
+        VIEW_MAX,
+      )
+      const vp = viewportRef.current
+      if (!vp) return
+      const rect = vp.getBoundingClientRect()
+      const localX = start.midX - rect.left
+      const localY = start.midY - rect.top
+      const contentX = (localX - start.x) / start.scale
+      const contentY = (localY - start.y) / start.scale
+      const newLocalX = midX - rect.left
+      const newLocalY = midY - rect.top
+      applyView({
+        scale: nextScale,
+        x: newLocalX - contentX * nextScale,
+        y: newLocalY - contentY * nextScale,
+      })
+      return
+    }
+
+    const pan = panRef.current
+    if (!pan) return
+    applyView({
+      scale: viewRef.current.scale,
+      x: pan.vx + (e.clientX - pan.x),
+      y: pan.vy + (e.clientY - pan.y),
+    })
+  }
+
+  const onViewportPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    pointersRef.current.delete(e.pointerId)
+    if (pointersRef.current.size < 2) pinchRef.current = null
+    if (pointersRef.current.size === 0) {
+      panRef.current = null
+      setPanning(false)
+    } else if (pointersRef.current.size === 1) {
+      const [pt] = pointersRef.current.values()
+      const cur = viewRef.current
+      panRef.current = { x: pt.x, y: pt.y, vx: cur.x, vy: cur.y }
+      pinchRef.current = null
+    }
+  }
+
+  // Non-passive wheel listener so preventDefault works for trackpad pinch/zoom.
+  useEffect(() => {
+    const vp = viewportRef.current
+    if (!vp) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = Math.exp(-e.deltaY * 0.0015)
+      zoomAt(e.clientX, e.clientY, viewRef.current.scale * factor)
+    }
+    vp.addEventListener('wheel', onWheel, { passive: false })
+    return () => vp.removeEventListener('wheel', onWheel)
+  }, [zoomAt])
 
   const flashSaved = useCallback(() => {
     setSaveFlash(true)
@@ -938,6 +1180,55 @@ export default function App() {
         </div>
 
         <div className="stage">
+          <div className="stage-bar" aria-label="Chart zoom">
+            <span className="stage-hint">Pinch or scroll to zoom · drag to pan</span>
+            <div className="stage-zoom">
+              <button
+                type="button"
+                className="stage-zoom-btn"
+                title="Zoom out"
+                aria-label="Zoom out"
+                onClick={() => zoomBy(1 / 1.25)}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="stage-zoom-btn stage-zoom-pct"
+                title="Fit chart to screen"
+                aria-label={`Zoom ${Math.round(view.scale * 100)} percent. Tap to fit`}
+                onClick={() => fitView()}
+              >
+                Fit
+              </button>
+              <span className="stage-zoom-readout" aria-live="polite">
+                {Math.round(view.scale * 100)}%
+              </span>
+              <button
+                type="button"
+                className="stage-zoom-btn"
+                title="Zoom in"
+                aria-label="Zoom in"
+                onClick={() => zoomBy(1.25)}
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <div
+            ref={viewportRef}
+            className={`stage-viewport${panning ? ' panning' : ''}`}
+            onPointerDown={onViewportPointerDown}
+            onPointerMove={onViewportPointerMove}
+            onPointerUp={onViewportPointerUp}
+            onPointerCancel={onViewportPointerUp}
+          >
+            <div
+              className="stage-canvas"
+              style={{
+                transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+              }}
+            >
           <svg
             ref={svgRef}
             width={W}
@@ -1119,6 +1410,14 @@ export default function App() {
                       transform={`translate(${lx - tw / 2}, ${ly - th / 2})`}
                       onPointerDown={(e) => onPointerDown(e, b.id)}
                     >
+                      {/* Larger invisible hit target for fingers */}
+                      <rect
+                        x={-10}
+                        y={-10}
+                        width={tw + 20}
+                        height={th + 20}
+                        fill="transparent"
+                      />
                       <rect
                         width={tw}
                         height={th}
@@ -1186,6 +1485,13 @@ export default function App() {
                         onPointerDown={(e) => onPointerDown(e, d.id)}
                       >
                         <rect
+                          x={-10}
+                          y={-10}
+                          width={tw + 20}
+                          height={th + 20}
+                          fill="transparent"
+                        />
+                        <rect
                           width={tw}
                           height={th}
                           rx={3}
@@ -1239,6 +1545,8 @@ export default function App() {
               })}
 
           </svg>
+            </div>
+          </div>
         </div>
       </div>
     </div>
