@@ -415,8 +415,6 @@ button:disabled {
 }
 
 .stage {
-  display: flex;
-  flex-direction: column;
   background: var(--bg-stage);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -424,87 +422,17 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
-.stage-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-  flex-shrink: 0;
-}
-
-.stage-hint {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  line-height: 1.2;
-}
-
-.stage-zoom {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.stage-zoom-btn {
-  min-width: 36px;
-  min-height: 36px;
-  padding: 0 10px;
-  border-radius: 8px;
-  font-size: 1.05rem;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.stage-zoom-pct {
-  min-width: 48px;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.stage-zoom-readout {
-  min-width: 40px;
-  text-align: center;
-  font-size: 0.78rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-
-.stage-viewport {
-  position: relative;
-  overflow: hidden;
-  touch-action: none;
-  overscroll-behavior: contain;
-  height: min(70vh, 640px);
-  background: var(--chart-bg);
-  cursor: grab;
-  flex: 1 1 auto;
-}
-
-.stage-viewport.panning {
-  cursor: grabbing;
-}
-
-.stage-canvas {
-  transform-origin: 0 0;
-  will-change: transform;
-  width: max-content;
-}
-
 .stage svg {
   display: block;
-  width: 1100px;
-  height: 640px;
-  max-width: none;
-  touch-action: none;
+  width: 100%;
+  height: auto;
   user-select: none;
 }
 
 .label-hit {
   cursor: grab;
+  /* Only label drags block native gestures; chart itself can pinch-zoom */
+  touch-action: none;
 }
 
 .label-hit:active {
@@ -625,32 +553,12 @@ button:disabled {
 
   .stage {
     border-radius: 10px;
-  }
-
-  .stage-bar {
-    padding: 8px;
-    gap: 8px;
-  }
-
-  .stage-hint {
-    font-size: 0.72rem;
-  }
-
-  .stage-zoom-btn {
-    min-width: 40px;
-    min-height: 40px;
-  }
-
-  .stage-viewport {
-    /* Tall enough to read; pan/pinch for the rest */
-    height: min(72vh, 560px);
-    min-height: 320px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .stage svg {
-    width: 1100px;
-    height: 640px;
-    min-width: 0;
+    min-width: 640px;
   }
 
   .error-msg {
