@@ -273,6 +273,20 @@ function isoFromMs(ms: number) {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
+/** Local calendar YYYY-MM-DD (not UTC — Europe evening can already be “tomorrow” in UTC). */
+export function calendarTodayIso(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Yahoo daily bar date in the exchange timezone (UTC keys are a day early for FX). */
+function isoFromYahooBar(tsSec: number, gmtOffsetSec: number): string {
+  return new Date((tsSec + gmtOffsetSec) * 1000).toISOString().slice(0, 10)
+}
+
 function eachDay(startIso: string, endIso: string): string[] {
   const out: string[] = []
   for (let t = dayMs(startIso); t <= dayMs(endIso); t += 86400000) {
@@ -339,30 +353,52 @@ function mergeMaps(base: Map<string, number>, extra: Map<string, number>) {
   return base
 }
 
-function parseYahooCloses(data: {
+type YahooLive = {
+  closes: Map<string, number>
+  /** Current/last trade price from chart meta (intraday “now”). */
+  livePrice: number | null
+}
+
+function parseYahooChart(data: {
   chart?: {
     result?: Array<{
+      meta?: { gmtoffset?: number; regularMarketPrice?: number }
       timestamp?: number[]
       indicators?: { quote?: Array<{ close?: Array<number | null> }> }
     }>
   }
-}): Map<string, number> {
+}): YahooLive {
   const result = data.chart?.result?.[0]
   const ts = result?.timestamp
   const close = result?.indicators?.quote?.[0]?.close
   if (!ts?.length || !close?.length) throw new Error('empty yahoo result')
+  const gmtOffset =
+    typeof result?.meta?.gmtoffset === 'number' ? result.meta.gmtoffset : 0
   const map = new Map<string, number>()
   for (let i = 0; i < ts.length; i++) {
     const c = close[i]
     if (c == null || !Number.isFinite(c)) continue
-    map.set(isoFromMs(ts[i] * 1000), c)
+    map.set(isoFromYahooBar(ts[i], gmtOffset), c)
   }
   if (!map.size) throw new Error('no closes')
-  return map
+  const liveRaw = result?.meta?.regularMarketPrice
+  const livePrice =
+    typeof liveRaw === 'number' && Number.isFinite(liveRaw) ? liveRaw : null
+  return { closes: map, livePrice }
+}
+
+function applyLiveTip(
+  map: Map<string, number>,
+  endIso: string,
+  live: YahooLive | null,
+) {
+  if (!live) return
+  mergeMaps(map, live.closes)
+  if (live.livePrice != null) map.set(endIso, live.livePrice)
 }
 
 /**
- * Live Yahoo closes for days past the bundled cache.
+ * Live Yahoo closes + current quote for days past the bundled cache.
  * Never hit query1 from the browser — GitHub Pages gets CORS errors in the console
  * even when the failure is caught. Dev uses the Vite proxy; Pages uses a CORS relay.
  */
@@ -370,20 +406,18 @@ async function fetchLiveYahooCloses(
   symbol: string,
   startIso: string,
   endIso: string,
-): Promise<Map<string, number> | null> {
+): Promise<YahooLive | null> {
   const period1 = Math.floor(dayMs(startIso) / 1000) - 86400
-  const period2 = Math.floor(dayMs(endIso) / 1000) + 86400
+  // Include the full end calendar day; Yahoo period2 is exclusive.
+  const period2 = Math.floor(dayMs(endIso) / 1000) + 2 * 86400
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`
   const yahooUrl = `https://query1.finance.yahoo.com${path}`
   const urls = import.meta.env.DEV
     ? [`/api/yahoo${path}`]
-    : [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
-        `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
-      ]
+    : [`https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`]
   for (const url of urls) {
     try {
-      return parseYahooCloses(await fetchJson(url, 14000))
+      return parseYahooChart(await fetchJson(url, 14000))
     } catch {
       /* try next source */
     }
@@ -399,20 +433,21 @@ async function fetchYahooCloses(
   const cached = mapFromCache(await loadPricesCache(), symbol)
   const ext = mapExtent(cached)
 
-  if (ext) {
-    if (endIso > ext.last) {
-      const gapStart = isoFromMs(dayMs(ext.last) - 2 * 86400000)
-      const live = await fetchLiveYahooCloses(symbol, gapStart, endIso)
-      if (live) mergeMaps(cached, live)
-    }
-    if (startIso < ext.first) {
-      const live = await fetchLiveYahooCloses(symbol, startIso, ext.first)
-      if (live) mergeMaps(cached, live)
-    }
-  } else {
-    const live = await fetchLiveYahooCloses(symbol, startIso, endIso)
-    if (live) mergeMaps(cached, live)
+  if (ext && startIso < ext.first) {
+    const live = await fetchLiveYahooCloses(symbol, startIso, ext.first)
+    if (live) mergeMaps(cached, live.closes)
   }
+
+  // Always refresh the tip through endIso and stamp regularMarketPrice on
+  // “today” so valuation is now — not last cache / previous session close.
+  const tipStart = ext
+    ? isoFromMs(dayMs(ext.last) - 2 * 86400000)
+    : startIso
+  applyLiveTip(
+    cached,
+    endIso,
+    await fetchLiveYahooCloses(symbol, tipStart, endIso),
+  )
 
   if (!cached.size) {
     throw new Error(
@@ -430,11 +465,8 @@ async function fetchEurUsd(
   const ext = mapExtent(cached)
 
   let fetchStart = startIso
-  if (ext) {
-    if (endIso <= ext.last && startIso >= ext.first) return cached
-    if (endIso > ext.last) {
-      fetchStart = isoFromMs(dayMs(ext.last) - 3 * 86400000)
-    }
+  if (ext && endIso > ext.last) {
+    fetchStart = isoFromMs(dayMs(ext.last) - 3 * 86400000)
   }
 
   try {
@@ -451,14 +483,14 @@ async function fetchEurUsd(
     /* keep cache */
   }
 
-  if (ext && endIso > ext.last) {
-    const live = await fetchLiveYahooCloses(
-      'EURUSD=X',
-      isoFromMs(dayMs(ext.last) - 2 * 86400000),
-      endIso,
-    )
-    if (live) mergeMaps(cached, live)
-  }
+  const tipStart = ext
+    ? isoFromMs(dayMs(ext.last) - 2 * 86400000)
+    : startIso
+  applyLiveTip(
+    cached,
+    endIso,
+    await fetchLiveYahooCloses('EURUSD=X', tipStart, endIso),
+  )
 
   if (cached.size) return cached
   return fetchYahooCloses('EURUSD=X', startIso, endIso)
@@ -491,7 +523,7 @@ export async function buildChartFromIbkrCsv(
   const tradeDates = trades.map((t) => t.date).sort()
   const start = tradeDates[0]
   const lastTrade = tradeDates[tradeDates.length - 1]
-  const today = new Date().toISOString().slice(0, 10)
+  const today = calendarTodayIso()
   const end = opts?.endDate ?? (today > lastTrade ? today : lastTrade)
 
   // Total return (modern portfolio charts): price P&L + net cash dividends.
