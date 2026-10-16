@@ -5,7 +5,7 @@ Portfolio earnings chart in the browser:
 - Upload a brokerage **Activity Statement** CSV (Interactive Brokers format)
 - Keep a synthetic **Classic (demo)** chart plus your private uploads in a left sidebar (uploads stay in browser `localStorage` only; trash to delete)
 - Drag buy-point labels (saved per portfolio)
-- Toggle series
+- Toggle series (including **if all → VOO** — same cash, all into VOO)
 - **Refresh to today** — rebuild active portfolio with latest prices through today
 - Export PNG
 

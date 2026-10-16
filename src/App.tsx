@@ -256,6 +256,8 @@ function investedBySeries(data: ChartData): Record<string, number> {
   return {
     ...bySym,
     TOTAL: total,
+    // Same cash, redirected into the baseline ticker.
+    ALL_VOO: total,
   }
 }
 
@@ -264,25 +266,35 @@ function normalizeChart(d: ChartData): ChartData {
     d.tickers?.length
       ? d.tickers
       : Object.keys(d.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
+  const baseline =
+    d.baseline || (tickers.includes('VOO') ? 'VOO' : tickers[0] || 'VOO')
   const colors: Record<string, string> = { ...d.colors }
   const labels: Record<string, string> = {
     ...d.labels,
     ...CHART_LABELS,
     TOTAL: d.labels?.TOTAL ?? CHART_LABELS.TOTAL ?? 'TOTAL',
+    ALL_VOO:
+      d.labels?.ALL_VOO ??
+      CHART_LABELS.ALL_VOO ??
+      `if all → ${baseline}`,
   }
-  delete colors.ALL_VOO
-  delete labels.ALL_VOO
   tickers.forEach((t, i) => {
     colors[t] = colors[t] ?? colorFor(t, i, 'dark')
     labels[t] = labels[t] ?? t
   })
   colors.TOTAL = colors.TOTAL ?? colorFor('TOTAL', 0, 'dark')
-  const series = { ...d.series }
-  delete series.ALL_VOO
+  colors.ALL_VOO = colors.ALL_VOO ?? colorFor('ALL_VOO', 0, 'dark')
+  const deltaAllVoo =
+    d.deltaAllVoo ??
+    (d.series.ALL_VOO && d.series.TOTAL
+      ? d.series.ALL_VOO[d.series.ALL_VOO.length - 1]! -
+        d.series.TOTAL[d.series.TOTAL.length - 1]!
+      : 0)
   return {
     ...d,
     tickers,
-    series,
+    baseline,
+    deltaAllVoo,
     colors,
     labels,
   }
@@ -562,8 +574,7 @@ export default function App() {
   }, [commitStore, showPortfolio])
 
   // One-shot: rebuild when asOf is before local today, or when an older
-  // saved chart is missing deposit-based fundingEur (so TOTAL “in” jumps
-  // from mid-market trade basis to real deposits, e.g. €21500).
+  // saved chart is missing deposit-based fundingEur / ALL_VOO series.
   useEffect(() => {
     if (didAutoRefresh.current || !data || busy) return
     const item = store.items.find((i) => i.id === store.activeId)
@@ -573,7 +584,9 @@ export default function App() {
     const needsFunding =
       item.chart != null &&
       !(item.chart.fundingEur != null && item.chart.fundingEur > 0)
-    if (!needsToday && !needsFunding) return
+    const needsAllVoo =
+      item.chart != null && !(item.chart.series?.ALL_VOO?.length > 0)
+    if (!needsToday && !needsFunding && !needsAllVoo) return
     didAutoRefresh.current = true
     void refreshToToday()
   }, [data, store, busy, refreshToToday])
@@ -821,6 +834,12 @@ export default function App() {
   const nameOf = (sym: string) =>
     data.labels?.[sym] ?? DEFAULT_LABELS[sym] ?? sym
   const invested = investedBySeries(data)
+  const delta =
+    data.deltaAllVoo ??
+    (data.series.ALL_VOO
+      ? data.series.ALL_VOO[data.series.ALL_VOO.length - 1]! -
+        data.series.TOTAL[data.series.TOTAL.length - 1]!
+      : 0)
 
   const paths = seriesOrder
     .filter((sym) => visible[sym] !== false && data.series[sym])
@@ -1115,7 +1134,10 @@ export default function App() {
                 fill="none"
                 points={pts}
                 stroke={seriesColor(sym)}
-                strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
+                strokeWidth={
+                  sym === 'TOTAL' || sym === 'ALL_VOO' ? 2.4 : 1.8
+                }
+                strokeDasharray={sym === 'ALL_VOO' ? '7 4' : undefined}
               />
             ))}
 
@@ -1125,9 +1147,14 @@ export default function App() {
                 const put = invested[sym] ?? 0
                 const earn = data.series[sym]?.[data.series[sym].length - 1] ?? 0
                 const now = put + earn
-                const div = data.dividendsEur?.[sym] ?? 0
+                const div =
+                  sym === 'ALL_VOO' ? 0 : (data.dividendsEur?.[sym] ?? 0)
                 const divText =
-                  div >= 0.5 ? ` · div ${fmtEur(div)}` : div <= -0.5 ? ` · div ${fmtEur(div)}` : ''
+                  div >= 0.5
+                    ? ` · div ${fmtEur(div)}`
+                    : div <= -0.5
+                      ? ` · div ${fmtEur(div)}`
+                      : ''
                 const putText = incognito
                   ? ''
                   : put > 0
@@ -1144,7 +1171,12 @@ export default function App() {
                       y1={0}
                       y2={0}
                       stroke={seriesColor(sym)}
-                      strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
+                      strokeWidth={
+                        sym === 'TOTAL' || sym === 'ALL_VOO' ? 2.4 : 1.8
+                      }
+                      strokeDasharray={
+                        sym === 'ALL_VOO' ? '7 4' : undefined
+                      }
                     />
                     <text x={24} y={4} fontSize={12} fill={chartUi.fg}>
                       {nameOf(sym)}
@@ -1342,6 +1374,35 @@ export default function App() {
                   </text>
                 )
               })}
+
+            {visible.TOTAL !== false &&
+              visible.ALL_VOO !== false &&
+              data.series.ALL_VOO &&
+              !incognito &&
+              Math.abs(delta) >= 1 && (
+                <g>
+                  <rect
+                    x={M.left + PLOT_W - 168}
+                    y={M.top + 8}
+                    width={156}
+                    height={28}
+                    rx={6}
+                    fill={chartUi.chip}
+                    stroke={seriesColor('ALL_VOO')}
+                    strokeWidth={1.2}
+                  />
+                  <text
+                    x={M.left + PLOT_W - 90}
+                    y={M.top + 27}
+                    textAnchor="middle"
+                    fontSize={12}
+                    fontWeight={700}
+                    fill={seriesColor('ALL_VOO')}
+                  >
+                    {`diff vs TOTAL: ${fmtEnd(delta)}`}
+                  </text>
+                </g>
+              )}
 
           </svg>
         </div>

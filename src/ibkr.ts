@@ -37,6 +37,10 @@ export type ChartData = {
    * money you put in, including broker FX vs mid-market.
    */
   fundingEur?: number
+  /** Counterfactual benchmark symbol (prefer VOO when prices exist). */
+  baseline?: string
+  /** Last ALL_VOO earnings − TOTAL (same cash, all in baseline). */
+  deltaAllVoo?: number
   colors: Record<string, string>
   labels: Record<string, string>
   title: string
@@ -84,12 +88,14 @@ export const CHART_COLORS_BY_THEME: Record<
     QQQ: '#2dd4bf',
     SMH: '#fb923c',
     TOTAL: '#4ade80',
+    ALL_VOO: '#f87171',
   },
   light: {
     VOO: '#1f77b4',
     QQQ: '#0f766e',
     SMH: '#c2410c',
     TOTAL: '#15803d',
+    ALL_VOO: '#dc2626',
   },
 }
 
@@ -101,6 +107,7 @@ export const CHART_LABELS: Record<string, string> = {
   QQQ: 'QQQ',
   SMH: 'SMH',
   TOTAL: 'TOTAL',
+  ALL_VOO: 'if all → VOO',
 }
 
 type Trade = { date: string; sym: string; usd: number; qty: number }
@@ -491,7 +498,9 @@ export function seriesKeys(data: ChartData): string[] {
   const tickers = data.tickers?.length
     ? data.tickers
     : Object.keys(data.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
-  return [...tickers, 'TOTAL']
+  const keys = [...tickers, 'TOTAL']
+  if (data.series.ALL_VOO?.length) keys.push('ALL_VOO')
+  return keys
 }
 
 export function colorFor(
@@ -501,6 +510,7 @@ export function colorFor(
 ): string {
   const known = CHART_COLORS_BY_THEME[theme]
   if (sym === 'TOTAL') return known.TOTAL
+  if (sym === 'ALL_VOO') return known.ALL_VOO
   if (known[sym]) return known[sym]
   const palette = theme === 'light' ? PALETTE_LIGHT : PALETTE_DARK
   return palette[index % palette.length]
@@ -756,6 +766,24 @@ function ffill(map: Map<string, number>, days: string[]): number[] {
   return out
 }
 
+async function pickBaseline(
+  tickers: string[],
+  startIso: string,
+  endIso: string,
+): Promise<{ baseline: string; map: Map<string, number> }> {
+  // Prefer VOO as the "if all → …" benchmark when prices exist.
+  const preferred = ['VOO', ...tickers.filter((t) => t !== 'VOO')]
+  for (const sym of preferred) {
+    try {
+      const map = await fetchYahooCloses(sym, startIso, endIso)
+      if (map.size) return { baseline: sym, map }
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error(`No benchmark prices for tickers: ${tickers.join(', ')}`)
+}
+
 export async function buildChartFromIbkrCsv(
   csvText: string,
   opts?: { endDate?: string },
@@ -781,10 +809,17 @@ export async function buildChartFromIbkrCsv(
 
   const padStart = isoFromMs(dayMs(start) - 2 * 86400000)
   const fxMap = await fetchEurUsd(padStart, end)
+  const { baseline, map: baselineMap } = await pickBaseline(
+    tickers,
+    padStart,
+    end,
+  )
 
   const priceMaps = new Map<string, Map<string, number>>()
+  priceMaps.set(baseline, baselineMap)
   await Promise.all(
     tickers.map(async (sym) => {
+      if (priceMaps.has(sym)) return
       priceMaps.set(sym, await fetchYahooCloses(sym, padStart, end))
     }),
   )
@@ -792,7 +827,7 @@ export async function buildChartFromIbkrCsv(
   const days = eachDay(start, end)
   const fx = ffill(fxMap, days)
   const px: Record<string, number[]> = {}
-  for (const sym of tickers) {
+  for (const sym of new Set([...tickers, baseline])) {
     px[sym] = ffill(priceMaps.get(sym)!, days)
   }
 
@@ -833,6 +868,9 @@ export async function buildChartFromIbkrCsv(
   )
   const buys: BuyPoint[] = []
   const divs: DivPoint[] = []
+  const allBase: number[] = []
+  let altShares = 0
+  let altInvested = 0
 
   // Dividends dated before the chart window still count toward total return.
   for (const [key, usd] of divAgg) {
@@ -889,11 +927,37 @@ export async function buildChartFromIbkrCsv(
         })
       }
     }
+
+    // Counterfactual: keep real baseline fills; redirect other cash into baseline.
+    const prevAlt = altShares
+    const baseBuy = buysAgg.get(`${d}|${baseline}`)
+    if (baseBuy) {
+      altShares += baseBuy.qty
+      altInvested += (baseBuy.usd / rate) * fundingScale
+    }
+    let otherUsd = 0
+    for (const sym of tickers) {
+      if (sym === baseline) continue
+      otherUsd += buysAgg.get(`${d}|${sym}`)?.usd ?? 0
+    }
+    if (otherUsd > 0) {
+      const basePx = px[baseline][i]
+      if (basePx > 0) altShares += otherUsd / basePx
+      altInvested += (otherUsd / rate) * fundingScale
+    }
+    let altEarn = altShares
+      ? (altShares * px[baseline][i]) / rate - altInvested
+      : 0
+    if (prevAlt === 0 && altShares > 0) altEarn = 0
+    allBase.push(Math.round(altEarn * 100) / 100)
   })
 
   const total = days.map((_, i) =>
     Math.round(tickers.reduce((s, t) => s + series[t][i], 0) * 100) / 100,
   )
+  const deltaAllVoo =
+    Math.round((allBase[allBase.length - 1]! - total[total.length - 1]!) * 100) /
+    100
 
   const dividendsEur: Record<string, number> = {}
   let divTotal = 0
@@ -906,9 +970,11 @@ export async function buildChartFromIbkrCsv(
 
   const colors: Record<string, string> = {
     TOTAL: CHART_COLORS_BY_THEME.dark.TOTAL,
+    ALL_VOO: CHART_COLORS_BY_THEME.dark.ALL_VOO,
   }
   const labels: Record<string, string> = {
     TOTAL: 'TOTAL',
+    ALL_VOO: `if all → ${baseline}`,
   }
   tickers.forEach((t, i) => {
     colors[t] = colorFor(t, i, 'dark')
@@ -919,15 +985,18 @@ export async function buildChartFromIbkrCsv(
     asOf: end,
     dates: days,
     tickers,
+    baseline,
     series: {
       ...series,
       TOTAL: total,
+      ALL_VOO: allBase,
     },
     buys,
     divs,
     dividendsEur,
     fundingEur:
       fundingEur != null && fundingEur > 0 ? fundingEur : undefined,
+    deltaAllVoo,
     colors,
     labels,
     title: 'Earnings',
