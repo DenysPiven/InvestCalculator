@@ -10,6 +10,7 @@ import {
 import {
   assetUrl,
   buildChartFromIbkrCsv,
+  calendarTodayIso,
   CHART_COLORS,
   CHART_LABELS,
   colorFor,
@@ -489,12 +490,12 @@ export default function App() {
     }
   }, [commitStore, showPortfolio])
 
-  // One-shot: if the active upload is older than today and we still have the CSV, rebuild.
+  // One-shot: if asOf is before local today and we still have the CSV, rebuild.
   useEffect(() => {
     if (didAutoRefresh.current || !data || busy) return
     const item = store.items.find((i) => i.id === store.activeId)
     if (!item || item.kind !== 'upload' || !item.csvText) return
-    const today = new Date().toISOString().slice(0, 10)
+    const today = calendarTodayIso()
     if (item.asOf && item.asOf >= today) return
     didAutoRefresh.current = true
     void refreshToToday()
