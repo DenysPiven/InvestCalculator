@@ -41,23 +41,24 @@ export type ChartData = {
 export type SeriesKey = string
 
 const PALETTE = [
-  '#1f77b4',
-  '#9467bd',
-  '#8c564b',
+  '#4aa3e0',
+  '#b48ad9',
+  '#c4846a',
   '#e377c2',
-  '#17becf',
-  '#ff7f0e',
-  '#bcbd22',
-  '#7f7f7f',
-  '#aec7e8',
-  '#c5b0d5',
+  '#3dced9',
+  '#ff9f45',
+  '#d4d04a',
+  '#a8a29e',
+  '#8ec5f0',
+  '#d2b8e8',
 ]
 
+/** Slightly brighter for contrast on the dark chart stage. */
 export const CHART_COLORS: Record<string, string> = {
-  VOO: '#1f77b4',
-  QQQ: '#9467bd',
-  SMH: '#8c564b',
-  TOTAL: '#2ca02c',
+  VOO: '#4aa3e0',
+  QQQ: '#b48ad9',
+  SMH: '#c4846a',
+  TOTAL: '#4cbf4c',
 }
 
 export const CHART_LABELS: Record<string, string> = {

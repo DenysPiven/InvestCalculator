@@ -49,6 +49,17 @@ type Buy = {
 
 const DEFAULT_LABELS = CHART_LABELS
 
+/** Chart / export palette — matches dark CSS tokens in index.css */
+const CHART_UI = {
+  bg: '#181511',
+  fg: '#f5f0e8',
+  muted: '#a8a29e',
+  grid: '#3f3a34',
+  zero: '#78716c',
+  chip: '#231f1b',
+  markerStroke: '#181511',
+} as const
+
 /** Factory layout for the synthetic Classic demo (not a real portfolio). */
 const FACTORY_POS: PosMap = {
   'VOO-2026-02-27': { lx: 1772219520000, ly: 14 },
@@ -206,21 +217,21 @@ function normalizeChart(d: ChartData): ChartData {
       ? d.tickers
       : Object.keys(d.series).filter((k) => k !== 'TOTAL' && k !== 'ALL_VOO')
   const colors: Record<string, string> = {
-    ...CHART_COLORS,
     ...d.colors,
-    TOTAL: d.colors?.TOTAL ?? CHART_COLORS.TOTAL,
+    ...CHART_COLORS,
   }
   const labels: Record<string, string> = {
-    ...CHART_LABELS,
     ...d.labels,
-    TOTAL: d.labels?.TOTAL ?? 'TOTAL',
+    ...CHART_LABELS,
+    TOTAL: d.labels?.TOTAL ?? CHART_LABELS.TOTAL ?? 'TOTAL',
   }
   delete colors.ALL_VOO
   delete labels.ALL_VOO
   tickers.forEach((t, i) => {
-    colors[t] = colors[t] ?? colorFor(t, i)
+    colors[t] = CHART_COLORS[t] ?? colors[t] ?? colorFor(t, i)
     labels[t] = labels[t] ?? t
   })
+  colors.TOTAL = CHART_COLORS.TOTAL
   const series = { ...d.series }
   delete series.ALL_VOO
   return {
@@ -685,7 +696,7 @@ export default function App() {
     clone.setAttribute('viewBox', `0 0 ${W} ${H}`)
     clone.setAttribute(
       'style',
-      'font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; background:#f7f3ea;',
+      `font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; background:${CHART_UI.bg};`,
     )
 
     const xml = new XMLSerializer().serializeToString(clone)
@@ -705,7 +716,7 @@ export default function App() {
     const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
-    ctx.fillStyle = '#f7f3ea'
+    ctx.fillStyle = CHART_UI.bg
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
@@ -938,14 +949,14 @@ export default function App() {
             onPointerUp={onPointerUp}
             onPointerLeave={onPointerUp}
           >
-            <rect x={0} y={0} width={W} height={H} fill="#f7f3ea" />
+            <rect x={0} y={0} width={W} height={H} fill={CHART_UI.bg} />
             <text
               x={W / 2}
               y={26}
               textAnchor="middle"
               fontSize={15}
               fontWeight={650}
-              fill="#1c1917"
+              fill={CHART_UI.fg}
             >
               Earnings
             </text>
@@ -957,7 +968,7 @@ export default function App() {
                   x2={M.left + PLOT_W}
                   y1={yScale(v)}
                   y2={yScale(v)}
-                  stroke="#cfc8bb"
+                  stroke={CHART_UI.grid}
                   strokeWidth={0.8}
                 />
                 {!incognito && (
@@ -966,7 +977,7 @@ export default function App() {
                     y={yScale(v) + 4}
                     textAnchor="end"
                     fontSize={11}
-                    fill="#57534e"
+                    fill={CHART_UI.muted}
                   >
                     {v}
                   </text>
@@ -980,7 +991,7 @@ export default function App() {
                   x2={xScale(m.t)}
                   y1={M.top}
                   y2={M.top + PLOT_H}
-                  stroke="#cfc8bb"
+                  stroke={CHART_UI.grid}
                   strokeWidth={0.6}
                 />
                 {!incognito && (
@@ -989,7 +1000,7 @@ export default function App() {
                     y={H - 16}
                     textAnchor="middle"
                     fontSize={11}
-                    fill="#57534e"
+                    fill={CHART_UI.muted}
                   >
                     {m.label}
                   </text>
@@ -1002,7 +1013,7 @@ export default function App() {
               x2={M.left + PLOT_W}
               y1={zeroY}
               y2={zeroY}
-              stroke="#888"
+              stroke={CHART_UI.zero}
               strokeWidth={1}
               strokeDasharray="4 3"
             />
@@ -1044,10 +1055,10 @@ export default function App() {
                       stroke={data.colors[sym]}
                       strokeWidth={sym === 'TOTAL' ? 2.4 : 1.8}
                     />
-                    <text x={24} y={4} fontSize={12} fill="#1c1917">
+                    <text x={24} y={4} fontSize={12} fill={CHART_UI.fg}>
                       {nameOf(sym)}
                       {putText ? (
-                        <tspan fill="#78716c" fontWeight={500}>
+                        <tspan fill={CHART_UI.muted} fontWeight={500}>
                           {putText}
                         </tspan>
                       ) : null}
@@ -1063,7 +1074,7 @@ export default function App() {
                 transform={`rotate(-90 18 ${M.top + PLOT_H / 2})`}
                 textAnchor="middle"
                 fontSize={12}
-                fill="#57534e"
+                fill={CHART_UI.muted}
               >
                 €
               </text>
@@ -1098,7 +1109,7 @@ export default function App() {
                     cy={py}
                     r={4.5}
                     fill={color}
-                    stroke="#fff"
+                    stroke={CHART_UI.markerStroke}
                     strokeWidth={1}
                   />
                   {labelsOn && (
@@ -1111,10 +1122,10 @@ export default function App() {
                         width={tw}
                         height={th}
                         rx={4}
-                        fill="#fff"
+                        fill={CHART_UI.chip}
                         stroke={color}
                         strokeWidth={active === b.id ? 1.6 : 0.9}
-                        opacity={0.95}
+                        opacity={0.96}
                       />
                       <text
                         x={tw / 2}
@@ -1163,7 +1174,7 @@ export default function App() {
                     )}
                     <polygon
                       points={`${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`}
-                      fill="#fff"
+                      fill={CHART_UI.chip}
                       stroke={color}
                       strokeWidth={1.4}
                     />
@@ -1177,11 +1188,11 @@ export default function App() {
                           width={tw}
                           height={th}
                           rx={3}
-                          fill="#fff"
+                          fill={CHART_UI.chip}
                           stroke={color}
                           strokeWidth={active === d.id ? 1.6 : 0.9}
                           strokeDasharray="3 2"
-                          opacity={0.95}
+                          opacity={0.96}
                         />
                         <text
                           x={tw / 2}
