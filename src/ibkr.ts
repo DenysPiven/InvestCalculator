@@ -460,9 +460,9 @@ async function fetchJson<T>(url: string, ms = 8000): Promise<T> {
 }
 
 export function assetUrl(path: string) {
-  // Bracket access avoids tsx/esbuild rewriting import.meta.env.BASE_URL in Node.
-  const meta = import.meta as unknown as { env?: Record<string, string> }
-  const base = meta.env?.['BASE_URL'] || '/'
+  // Must be a *static* `.BASE_URL` access so Vite inlines `/InvestCalculator/`
+  // for GitHub Pages. Dynamic `env['BASE_URL']` breaks and 404s JSON assets.
+  const base = import.meta.env.BASE_URL || '/'
   const p = path.startsWith('/') ? path.slice(1) : path
   return `${base}${p}`
 }
@@ -572,8 +572,7 @@ async function fetchLiveYahooCloses(
   const period2 = Math.floor(dayMs(endIso) / 1000) + 2 * 86400
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`
   const yahooUrl = `https://query1.finance.yahoo.com${path}`
-  const meta = import.meta as unknown as { env?: Record<string, unknown> }
-  const urls = meta.env?.['DEV']
+  const urls = import.meta.env.DEV
     ? [`/api/yahoo${path}`]
     : [`https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`]
   for (const url of urls) {
