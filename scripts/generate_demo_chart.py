@@ -16,10 +16,10 @@ OUT_SAVED = ROOT / "saved_positions.json"
 
 TICKERS = ["VOO", "QQQ", "SMH"]
 COLORS = {
-    "VOO": "#4aa3e0",
-    "QQQ": "#b48ad9",
-    "SMH": "#c4846a",
-    "TOTAL": "#4cbf4c",
+    "VOO": "#62b0f0",
+    "QQQ": "#2dd4bf",
+    "SMH": "#fb923c",
+    "TOTAL": "#4ade80",
 }
 LABELS = {
     "VOO": "VOO",

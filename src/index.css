@@ -1,36 +1,82 @@
 :root {
-  color-scheme: dark;
-  --bg: #12100e;
-  --bg-panel: #1c1917;
-  --bg-panel-hover: #262220;
-  --bg-stage: #181511;
-  --bg-elevated: #231f1b;
-  --border: #3f3a34;
-  --border-strong: #57534e;
-  --text: #f5f0e8;
-  --text-muted: #a8a29e;
-  --text-soft: #78716c;
-  --accent: #3d8f6e;
-  --accent-hover: #2f7358;
-  --accent-deep: #245a45;
-  --danger: #f87171;
-  --danger-bg: rgba(185, 28, 28, 0.18);
-  --shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-  --chart-bg: #181511;
-  --chart-fg: #f5f0e8;
-  --chart-muted: #a8a29e;
-  --chart-grid: #3f3a34;
-  --chart-zero: #78716c;
-  --chart-chip: #231f1b;
-  --chart-marker-stroke: #181511;
-
-  color: var(--text);
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(61, 143, 110, 0.14), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(245, 240, 232, 0.04), transparent 50%),
-    var(--bg);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.4;
+}
+
+/* Cool slate dark — higher contrast, clearer series on the chart */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0e12;
+  --bg-panel: #121820;
+  --bg-panel-hover: #1a222d;
+  --bg-stage: #0e141c;
+  --bg-elevated: #18212c;
+  --border: #2a3544;
+  --border-strong: #3d4d60;
+  --text: #e9eef5;
+  --text-muted: #93a1b3;
+  --text-soft: #6b7a8d;
+  --accent: #3dcaa0;
+  --accent-hover: #2fb890;
+  --accent-deep: #1f8f6e;
+  --accent-fg: #06120e;
+  --accent-glow: rgba(61, 202, 160, 0.28);
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.14);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --bg-glow-a: rgba(61, 202, 160, 0.12);
+  --bg-glow-b: rgba(96, 165, 250, 0.08);
+  --switch-off: #2a3544;
+  --chart-bg: #0e141c;
+  --chart-fg: #e9eef5;
+  --chart-muted: #93a1b3;
+  --chart-grid: #243142;
+  --chart-zero: #5c6b7e;
+  --chart-chip: #18212c;
+  --chart-marker-stroke: #0e141c;
+  --theme-color: #0b0e12;
+}
+
+/* Warm paper light (original brand direction) */
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e8e2d6;
+  --bg-panel: #faf7f0;
+  --bg-panel-hover: #fff;
+  --bg-stage: #f7f3ea;
+  --bg-elevated: #fff;
+  --border: #d6d0c4;
+  --border-strong: #a8a29e;
+  --text: #1c1917;
+  --text-muted: #57534e;
+  --text-soft: #78716c;
+  --accent: #1f4e3d;
+  --accent-hover: #16382c;
+  --accent-deep: #1f4e3d;
+  --accent-fg: #faf7f0;
+  --accent-glow: rgba(31, 78, 61, 0.16);
+  --danger: #b91c1c;
+  --danger-bg: #fef2f2;
+  --shadow: 0 10px 30px rgba(40, 30, 10, 0.08);
+  --bg-glow-a: rgba(31, 78, 61, 0.08);
+  --bg-glow-b: rgba(255, 255, 255, 0.35);
+  --switch-off: #c4bdb2;
+  --chart-bg: #f7f3ea;
+  --chart-fg: #1c1917;
+  --chart-muted: #57534e;
+  --chart-grid: #cfc8bb;
+  --chart-zero: #888;
+  --chart-chip: #fff;
+  --chart-marker-stroke: #fff;
+  --theme-color: #e8e2d6;
+}
+
+html {
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, var(--bg-glow-a), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, var(--bg-glow-b), transparent 50%),
+    var(--bg);
 }
 
 * {
@@ -91,7 +137,7 @@ body {
   border-radius: 7px;
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-fg);
 }
 
 .sidebar-upload:hover {
@@ -121,7 +167,7 @@ body {
 .portfolio-list li.selected {
   border-color: var(--border-strong);
   background: var(--bg-elevated);
-  box-shadow: inset 0 0 0 1px rgba(61, 143, 110, 0.28);
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
 }
 
 .portfolio-item {
@@ -242,18 +288,19 @@ button:hover {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-fg);
 }
 
 button.primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  color: var(--accent-fg);
 }
 
 button.saved {
   background: var(--accent-deep);
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-fg);
 }
 
 button:disabled {
@@ -283,7 +330,7 @@ button:disabled {
   width: 36px;
   height: 20px;
   border-radius: 999px;
-  background: #3f3a34;
+  background: var(--switch-off);
   border: 1px solid var(--border-strong);
   flex-shrink: 0;
   transition: background 0.15s ease, border-color 0.15s ease;

@@ -40,26 +40,55 @@ export type ChartData = {
 /** @deprecated use string series keys; kept for older call sites */
 export type SeriesKey = string
 
-const PALETTE = [
-  '#4aa3e0',
-  '#b48ad9',
-  '#c4846a',
-  '#e377c2',
-  '#3dced9',
-  '#ff9f45',
-  '#d4d04a',
-  '#a8a29e',
-  '#8ec5f0',
-  '#d2b8e8',
+export type UiTheme = 'dark' | 'light'
+
+const PALETTE_DARK = [
+  '#62b0f0',
+  '#2dd4bf',
+  '#fb923c',
+  '#f472b6',
+  '#38bdf8',
+  '#fbbf24',
+  '#a3e635',
+  '#94a3b8',
+  '#7dd3fc',
+  '#5eead4',
 ]
 
-/** Slightly brighter for contrast on the dark chart stage. */
-export const CHART_COLORS: Record<string, string> = {
-  VOO: '#4aa3e0',
-  QQQ: '#b48ad9',
-  SMH: '#c4846a',
-  TOTAL: '#4cbf4c',
+const PALETTE_LIGHT = [
+  '#1f77b4',
+  '#0f766e',
+  '#c2410c',
+  '#be185d',
+  '#0284c7',
+  '#d97706',
+  '#65a30d',
+  '#57534e',
+  '#38bdf8',
+  '#14b8a6',
+]
+
+/** Series colors tuned per theme for contrast on the chart stage. */
+export const CHART_COLORS_BY_THEME: Record<
+  UiTheme,
+  Record<string, string>
+> = {
+  dark: {
+    VOO: '#62b0f0',
+    QQQ: '#2dd4bf',
+    SMH: '#fb923c',
+    TOTAL: '#4ade80',
+  },
+  light: {
+    VOO: '#1f77b4',
+    QQQ: '#0f766e',
+    SMH: '#c2410c',
+    TOTAL: '#15803d',
+  },
 }
+
+/** @deprecated prefer CHART_COLORS_BY_THEME[theme] */
+export const CHART_COLORS = CHART_COLORS_BY_THEME.dark
 
 export const CHART_LABELS: Record<string, string> = {
   VOO: 'VOO',
@@ -260,10 +289,16 @@ export function seriesKeys(data: ChartData): string[] {
   return [...tickers, 'TOTAL']
 }
 
-export function colorFor(sym: string, index = 0): string {
-  if (sym === 'TOTAL') return CHART_COLORS.TOTAL
-  if (CHART_COLORS[sym]) return CHART_COLORS[sym]
-  return PALETTE[index % PALETTE.length]
+export function colorFor(
+  sym: string,
+  index = 0,
+  theme: UiTheme = 'dark',
+): string {
+  const known = CHART_COLORS_BY_THEME[theme]
+  if (sym === 'TOTAL') return known.TOTAL
+  if (known[sym]) return known[sym]
+  const palette = theme === 'light' ? PALETTE_LIGHT : PALETTE_DARK
+  return palette[index % palette.length]
 }
 
 function dayMs(iso: string) {
@@ -644,13 +679,13 @@ export async function buildChartFromIbkrCsv(
   dividendsEur.TOTAL = Math.round(divTotal * 100) / 100
 
   const colors: Record<string, string> = {
-    TOTAL: CHART_COLORS.TOTAL,
+    TOTAL: CHART_COLORS_BY_THEME.dark.TOTAL,
   }
   const labels: Record<string, string> = {
     TOTAL: 'TOTAL',
   }
   tickers.forEach((t, i) => {
-    colors[t] = colorFor(t, i)
+    colors[t] = colorFor(t, i, 'dark')
     labels[t] = t
   })
 
