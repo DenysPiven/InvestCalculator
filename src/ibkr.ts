@@ -565,11 +565,20 @@ type PricesCache = {
   prices: Record<string, Record<string, number>>
 }
 
+type YahooLive = {
+  closes: Map<string, number>
+  /** Current/last trade price from chart meta (intraday “now”). */
+  livePrice: number | null
+}
+
 let pricesCachePromise: Promise<PricesCache | null> | null = null
+/** Deduplicate concurrent live tip fetches (Refresh hits VOO + baseline + FX). */
+const liveYahooInflight = new Map<string, Promise<YahooLive | null>>()
 
 /** Drop in-memory price cache so the next build reloads prices_cache.json. */
 export function invalidatePricesCache() {
   pricesCachePromise = null
+  liveYahooInflight.clear()
 }
 
 function loadPricesCache() {
@@ -604,12 +613,6 @@ function mapExtent(map: Map<string, number>): { first: string; last: string } | 
 function mergeMaps(base: Map<string, number>, extra: Map<string, number>) {
   for (const [d, v] of extra) base.set(d, v)
   return base
-}
-
-type YahooLive = {
-  closes: Map<string, number>
-  /** Current/last trade price from chart meta (intraday “now”). */
-  livePrice: number | null
 }
 
 function parseYahooChart(data: {
@@ -650,32 +653,79 @@ function applyLiveTip(
   if (live.livePrice != null) map.set(endIso, live.livePrice)
 }
 
+/** Hard budget for live Yahoo via public CORS relays (they often hang/403). */
+const LIVE_YAHOO_MS = 2800
+
+type YahooProxyKind = 'json' | 'allorigins-get'
+
 /**
  * Live Yahoo closes + current quote for days past the bundled cache.
- * Never hit query1 from the browser — GitHub Pages gets CORS errors in the console
- * even when the failure is caught. Dev uses the Vite proxy; Pages uses a CORS relay.
+ * Never hit query1 from the browser — GitHub Pages needs a CORS relay.
+ * Relays are flaky: race a short timeout and fall back to prices_cache.json
+ * so Refresh / upload never spins for tens of seconds.
  */
 async function fetchLiveYahooCloses(
   symbol: string,
   startIso: string,
   endIso: string,
 ): Promise<YahooLive | null> {
+  const key = `${symbol}|${startIso}|${endIso}`
+  const hit = liveYahooInflight.get(key)
+  if (hit) return hit
+
   const period1 = Math.floor(dayMs(startIso) / 1000) - 86400
   // Include the full end calendar day; Yahoo period2 is exclusive.
   const period2 = Math.floor(dayMs(endIso) / 1000) + 2 * 86400
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`
   const yahooUrl = `https://query1.finance.yahoo.com${path}`
-  const urls = import.meta.env.DEV
-    ? [`/api/yahoo${path}`]
-    : [`https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`]
-  for (const url of urls) {
-    try {
-      return parseYahooChart(await fetchJson(url, 14000))
-    } catch {
-      /* try next source */
+
+  const parseProxy = async (
+    url: string,
+    kind: YahooProxyKind,
+  ): Promise<YahooLive> => {
+    if (kind === 'allorigins-get') {
+      // /raw often lacks ACAO for github.io; /get returns { contents: "<json>" }.
+      const wrapped = await fetchJson<{ contents?: string }>(url, LIVE_YAHOO_MS)
+      if (typeof wrapped.contents !== 'string' || !wrapped.contents) {
+        throw new Error('empty allorigins contents')
+      }
+      return parseYahooChart(
+        JSON.parse(wrapped.contents) as {
+          chart?: {
+            result?: Array<{
+              meta?: { gmtoffset?: number; regularMarketPrice?: number }
+              timestamp?: number[]
+              indicators?: { quote?: Array<{ close?: Array<number | null> }> }
+            }>
+          }
+        },
+      )
     }
+    return parseYahooChart(await fetchJson(url, LIVE_YAHOO_MS))
   }
-  return null
+
+  const run = (async (): Promise<YahooLive | null> => {
+    const candidates: Array<[string, YahooProxyKind]> = import.meta.env.DEV
+      ? [[`/api/yahoo${path}`, 'json']]
+      : [
+          [
+            `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`,
+            'allorigins-get',
+          ],
+        ]
+    try {
+      return await Promise.any(
+        candidates.map(([url, kind]) => parseProxy(url, kind)),
+      )
+    } catch {
+      return null
+    } finally {
+      liveYahooInflight.delete(key)
+    }
+  })()
+
+  liveYahooInflight.set(key, run)
+  return run
 }
 
 async function fetchYahooCloses(
@@ -686,21 +736,26 @@ async function fetchYahooCloses(
   const cached = mapFromCache(await loadPricesCache(), symbol)
   const ext = mapExtent(cached)
 
-  if (ext && startIso < ext.first) {
-    const live = await fetchLiveYahooCloses(symbol, startIso, ext.first)
+  // Cache-first: only ask the live relay when the tip is actually stale, and
+  // never block the chart on a dead proxy (budget is LIVE_YAHOO_MS).
+  const needsHistory = Boolean(ext && startIso < ext.first)
+  const needsTip = !ext || ext.last < endIso
+
+  if (needsHistory) {
+    const live = await fetchLiveYahooCloses(symbol, startIso, ext!.first)
     if (live) mergeMaps(cached, live.closes)
   }
 
-  // Always refresh the tip through endIso and stamp regularMarketPrice on
-  // “today” so valuation is now — not last cache / previous session close.
-  const tipStart = ext
-    ? isoFromMs(dayMs(ext.last) - 2 * 86400000)
-    : startIso
-  applyLiveTip(
-    cached,
-    endIso,
-    await fetchLiveYahooCloses(symbol, tipStart, endIso),
-  )
+  if (needsTip || !ext) {
+    const tipStart = ext
+      ? isoFromMs(dayMs(ext.last) - 2 * 86400000)
+      : startIso
+    applyLiveTip(
+      cached,
+      endIso,
+      await fetchLiveYahooCloses(symbol, tipStart, endIso),
+    )
+  }
 
   if (!cached.size) {
     throw new Error(
@@ -727,23 +782,26 @@ async function fetchEurUsd(
       rates: Record<string, { USD: number }>
     }>(
       `https://api.frankfurter.dev/v1/${fetchStart}..${endIso}?from=EUR&to=USD`,
-      6000,
+      4000,
     )
     for (const [d, r] of Object.entries(data.rates ?? {})) {
       if (r?.USD) cached.set(d, r.USD)
     }
   } catch {
-    /* keep cache */
+    /* keep cache / try Yahoo tip below */
   }
 
-  const tipStart = ext
-    ? isoFromMs(dayMs(ext.last) - 2 * 86400000)
-    : startIso
-  applyLiveTip(
-    cached,
-    endIso,
-    await fetchLiveYahooCloses('EURUSD=X', tipStart, endIso),
-  )
+  const tipExt = mapExtent(cached)
+  if (!tipExt || tipExt.last < endIso) {
+    const tipStart = tipExt
+      ? isoFromMs(dayMs(tipExt.last) - 2 * 86400000)
+      : startIso
+    applyLiveTip(
+      cached,
+      endIso,
+      await fetchLiveYahooCloses('EURUSD=X', tipStart, endIso),
+    )
+  }
 
   if (cached.size) return cached
   return fetchYahooCloses('EURUSD=X', startIso, endIso)
@@ -768,18 +826,14 @@ function ffill(map: Map<string, number>, days: string[]): number[] {
 
 async function pickBaseline(
   tickers: string[],
-  startIso: string,
-  endIso: string,
 ): Promise<{ baseline: string; map: Map<string, number> }> {
   // Prefer VOO as the "if all → …" benchmark when prices exist.
+  // Cache-only here — live tip runs once in parallel with the other tickers.
   const preferred = ['VOO', ...tickers.filter((t) => t !== 'VOO')]
+  const cache = await loadPricesCache()
   for (const sym of preferred) {
-    try {
-      const map = await fetchYahooCloses(sym, startIso, endIso)
-      if (map.size) return { baseline: sym, map }
-    } catch {
-      /* try next */
-    }
+    const map = mapFromCache(cache, sym)
+    if (map.size) return { baseline: sym, map }
   }
   throw new Error(`No benchmark prices for tickers: ${tickers.join(', ')}`)
 }
@@ -808,18 +862,15 @@ export async function buildChartFromIbkrCsv(
   }
 
   const padStart = isoFromMs(dayMs(start) - 2 * 86400000)
-  const fxMap = await fetchEurUsd(padStart, end)
-  const { baseline, map: baselineMap } = await pickBaseline(
-    tickers,
-    padStart,
-    end,
-  )
+  const [{ baseline }, fxMap] = await Promise.all([
+    pickBaseline(tickers),
+    fetchEurUsd(padStart, end),
+  ])
 
   const priceMaps = new Map<string, Map<string, number>>()
-  priceMaps.set(baseline, baselineMap)
+  const priceSyms = [...new Set([...tickers, baseline])]
   await Promise.all(
-    tickers.map(async (sym) => {
-      if (priceMaps.has(sym)) return
+    priceSyms.map(async (sym) => {
       priceMaps.set(sym, await fetchYahooCloses(sym, padStart, end))
     }),
   )
