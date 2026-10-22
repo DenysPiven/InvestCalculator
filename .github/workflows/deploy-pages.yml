@@ -4,9 +4,10 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
-  # Keep the bundled price cache fresh on Pages (only new days are downloaded).
+  # Keep the bundled price cache fresh on Pages (browser uses cache, not Yahoo).
+  # Twice on weekdays so “Refresh to today” stays close to market closes.
   schedule:
-    - cron: '30 6 * * 1-5'
+    - cron: '30 6,21 * * 1-5'
 
 permissions:
   contents: read
